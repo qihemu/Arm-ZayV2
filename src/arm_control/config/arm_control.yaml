@@ -1,0 +1,7 @@
+arm_driver_node:
+  ros__parameters:
+    planning_group: arm                        # 规划组名称，对应 SRDF 中的 group
+    robot_description_name: robot_description  # URDF 参数名（勿与 robot_description 混淆）
+    planning_time: 5.0                         # 运动规划超时时间（秒）
+    max_velocity_scaling_factor: 0.1             # 速度缩放系数（0~1）
+    max_acceleration_scaling_factor: 0.1         # 加速度缩放系数（0~1）
