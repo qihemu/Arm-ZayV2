@@ -1,0 +1,9 @@
+# 请求部分
+# preset_name：SRDF 中定义的命名姿态（如 home、init）
+
+string preset_name
+
+---
+# 响应部分
+
+bool success

@@ -23,6 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
   # 添加srv文件
   "srv/ArmMoveToPoint.srv"
+  "srv/SetPresetPose.srv"
 
   DEPENDENCIES std_msgs action_msgs geometry_msgs builtin_interfaces
 )
