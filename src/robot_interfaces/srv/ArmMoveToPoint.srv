@@ -1,0 +1,10 @@
+# 请求部分
+# target_point：目标点信息
+# offset_value：偏移量
+
+WayPointInfo target_point
+
+---
+# 响应部分
+
+bool success
