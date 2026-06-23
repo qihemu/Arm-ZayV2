@@ -5,6 +5,6 @@ arm_driver_node:
     planning_time: 5.0                         # 运动规划超时时间（秒）
     max_velocity_scaling_factor: 0.1             # 速度缩放系数（0~1）
     max_acceleration_scaling_factor: 0.1         # 加速度缩放系数（0~1）
-    cartesian_step_size: 0.01                    # 笛卡尔直线插值步长（m）
+    cartesian_step_size: 0.05                    # 笛卡尔直线插值步长（m）
     cartesian_jump_threshold: 0.0                # 关节空间跳跃阈值（0 禁用）
-    cartesian_min_fraction: 0.95                 # 笛卡尔路径最低完成比例
+    cartesian_min_fraction: 0.90                 # 笛卡尔路径最低完成比例

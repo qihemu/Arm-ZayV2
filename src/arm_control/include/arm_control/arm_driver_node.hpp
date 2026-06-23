@@ -1,83 +1,36 @@
 #pragma once
 
-#include <atomic>
+#include <functional>
 #include <memory>
-#include <mutex>
-#include <string>
-#include <thread>
 
-#include <geometry_msgs/msg/pose.hpp>
-#include <moveit/move_group_interface/move_group_interface.h>
 #include <rclcpp/rclcpp.hpp>
-#include <robot_interfaces/msg/way_point_info.hpp>
 #include <robot_interfaces/srv/arm_move_to_point.hpp>
 #include <robot_interfaces/srv/set_preset_pose.hpp>
+
+#include "arm_control/arm_controller.hpp"
 
 namespace arm_control
 {
 
-// 基于 MoveIt 的机械臂控制封装类
-class ArmController
+class ArmDriverNode
 {
 public:
-    explicit ArmController(const rclcpp::Node::SharedPtr& node);
-    ~ArmController();
-
-    // 初始化 MoveGroupInterface 与执行器
-    void initialize();
-
-    // 移动到 SRDF 中定义的命名姿态（如 home、init）
-    bool moveToNamedTarget(const std::string& target_name);
-    // 移动到目标笛卡尔位姿（OMPL 关节空间规划）
-    bool moveToPose(const geometry_msgs::msg::Pose& target_pose);
-    // 笛卡尔直线运动到目标位姿
-    bool moveToPoseCartesian(const geometry_msgs::msg::Pose& target_pose,
-                             double velocity_scale, double acceleration_scale);
-    // 根据 WayPointInfo 移动到目标点
-    bool moveToWayPoint(const robot_interfaces::msg::WayPointInfo& waypoint_info);
-    // 移动到目标关节角度
-    bool moveToJointValues(const std::vector<double>& joint_values);
-    // 规划并执行当前目标
-    bool planAndExecute();
-
-    // 获取底层 MoveGroupInterface，便于扩展高级功能
-    moveit::planning_interface::MoveGroupInterface& moveGroup();
-    const moveit::planning_interface::MoveGroupInterface& moveGroup() const;
+    ArmDriverNode();
+    void spin();
 
 private:
-    // 从参数服务器加载配置
-    void loadParameters();
-    // 启动独立线程 spin 节点（MoveIt 接口要求）
-    void startExecutor();
-    // 停止执行器线程
-    void stopExecutor();
-    // 处理移动到目标点服务请求
+    void setupServices();
     void handleMoveToPoint(
         const std::shared_ptr<robot_interfaces::srv::ArmMoveToPoint::Request> request,
         std::shared_ptr<robot_interfaces::srv::ArmMoveToPoint::Response> response);
-    // 处理移动到预设姿态服务请求
     void handleSetPresetPose(
         const std::shared_ptr<robot_interfaces::srv::SetPresetPose::Request> request,
         std::shared_ptr<robot_interfaces::srv::SetPresetPose::Response> response);
 
     rclcpp::Node::SharedPtr node_;
-    std::string planning_group_;              // 规划组名称
-    std::string robot_description_name_;         // 机器人 URDF 参数名
-    double planning_time_{5.0};                // 规划超时时间（秒）
-    double max_velocity_scaling_factor_{0.1};  // 最大速度缩放系数
-    double max_acceleration_scaling_factor_{0.1};  // 最大加速度缩放系数
-    double cartesian_step_size_{0.01};         // 笛卡尔路径插值步长（m）
-    double cartesian_jump_threshold_{0.0};     // 关节空间跳跃阈值（0 表示禁用）
-    double cartesian_min_fraction_{0.95};      // 笛卡尔路径最低完成比例
-
-    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
+    ArmController controller_;
     rclcpp::Service<robot_interfaces::srv::ArmMoveToPoint>::SharedPtr move_to_point_service_;
     rclcpp::Service<robot_interfaces::srv::SetPresetPose>::SharedPtr set_preset_pose_service_;
-
-    std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> executor_;
-    std::thread executor_thread_;
-    std::atomic<bool> spinning_{false};
-    std::mutex motion_mutex_;  // 串行化运动请求，避免并发操作 move_group
 };
 
 }  // namespace arm_control

@@ -15,7 +15,9 @@ find_package(robot_interfaces REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
 # 控制节点可执行文件
-add_executable(arm_driver_node src/arm_driver_node.cpp)
+add_executable(arm_driver_node
+    src/arm_driver_node.cpp
+    src/arm_controller.cpp)
 target_include_directories(arm_driver_node PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
