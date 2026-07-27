@@ -1,0 +1,58 @@
+###############################################
+# Aubo i5 MoveIt Servo 参数
+# 加载方式：servo.launch.py → servo_node_main
+###############################################
+use_gazebo: false
+
+## 输入指令属性
+# speed_units：与 servo_keyboard_node 的 linear_speed / angular_speed 一致（m/s、rad/s）
+command_in_type: "speed_units"
+scale:
+  linear: 0.05
+  rotational: 0.3
+  joint: 0.5
+
+## 输出指令属性
+publish_period: 0.034
+low_latency_mode: false
+command_out_type: trajectory_msgs/JointTrajectory
+publish_joint_positions: true
+publish_joint_velocities: true
+publish_joint_accelerations: false
+
+## 输出平滑插件
+smoothing_filter_plugin_name: "online_signal_smoothing::ButterworthFilterPlugin"
+
+# 与 move_group 同时运行时设为 false，由 move_group 提供主编规划场景
+is_primary_planning_scene_monitor: false
+
+## MoveIt 属性（须与 aubo_i5.srdf 一致）
+move_group_name: arm
+planning_frame: base_link
+ee_frame_name: wrist3_Link
+robot_link_command_frame: base_link
+
+## 停车行为
+incoming_command_timeout: 0.1
+num_outgoing_halt_msgs_to_publish: 4
+halt_all_joints_in_joint_mode: true
+halt_all_joints_in_cartesian_mode: true
+
+## 奇异点与关节限位
+lower_singularity_threshold: 17.0
+hard_stop_singularity_threshold: 30.0
+joint_limit_margin: 0.1
+leaving_singularity_threshold_multiplier: 2.0
+
+## 话题名称
+cartesian_command_in_topic: ~/delta_twist_cmds
+joint_command_in_topic: ~/delta_joint_cmds
+joint_topic: /joint_states
+status_topic: ~/status
+command_out_topic: /arm_controller/joint_trajectory
+
+## 碰撞检测
+check_collisions: true
+collision_check_rate: 10.0
+self_collision_proximity_threshold: 0.01
+scene_collision_proximity_threshold: 0.02

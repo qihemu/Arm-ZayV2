@@ -173,6 +173,8 @@ MoveIt 2 支持多种规划器插件，可按场景选用：
 - 带碰撞检测与奇异点处理
 - 面向实时控制回路设计
 
+详细说明见：[MoveIt Servo 详解](./moveit-servo.md)
+
 参考教程：[Realtime Arm Servoing Tutorial](https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html)
 
 ---
@@ -287,10 +289,17 @@ RViz 插件包括：
 - 抓取与放置（Pick & Place）
 - 避障导航
 - 与 `ros2_control` 的集成
+- 实时伺服控制（见 [MoveIt Servo 详解](./moveit-servo.md)）
 
 ---
 
 ## 参考链接
+
+### 项目文档
+
+- [MoveIt Servo 详解](./moveit-servo.md)
+
+### 外部链接
 
 - [MoveIt 2 官网](https://moveit.ai/)
 - [官方教程](https://moveit.picknik.ai/)

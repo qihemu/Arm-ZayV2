@@ -13,6 +13,7 @@ find_package(moveit_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(robot_interfaces REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(moveit_ros_planning REQUIRED)
 
 # 控制节点可执行文件
 add_executable(arm_driver_node
@@ -35,6 +36,15 @@ target_link_libraries(arm_driver_node
     robot_interfaces::robot_interfaces__rosidl_typesupport_cpp)
 
 install(TARGETS arm_driver_node
+    RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+# 键盘遥操作节点：向官方 servo_node 发布 TwistStamped
+add_executable(servo_keyboard_node src/servo_keyboard_node.cpp)
+ament_target_dependencies(servo_keyboard_node
+    rclcpp
+    geometry_msgs)
+
+install(TARGETS servo_keyboard_node
     RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY include/
