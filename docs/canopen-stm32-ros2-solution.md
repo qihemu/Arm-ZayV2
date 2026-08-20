@@ -10,12 +10,14 @@
 
 ### 1.1 目标
 
+
 | 层级  | 目标                                                                                             |
 | --- | ---------------------------------------------------------------------------------------------- |
 | 下位机 | 每关节一块 STM32F4 驱动板，运行 **CANopenNode 从站** + **CiA 402**，完成 FOC/位置环与总线通信                          |
 | 上位机 | Linux + **SocketCAN** + **CANopen 主站** + **ros2_control**，替换当前 `mock_components/GenericSystem` |
-| 应用  | 保留 **MoveIt `move_group`**、**`arm_control` 服务**、**MoveIt Servo** 数据通路，仅更换硬件抽象与机器人模型            |
-| 标定  | **单圈编码器** + **收纳位上电标定**（不写 Flash 存多圈）；关节侧 **rad / rad/s** 与 MoveIt 统一（见第 8 节）              |
+| 应用  | 保留 **MoveIt `move_group`**、`**arm_control` 服务**、**MoveIt Servo** 数据通路，仅更换硬件抽象与机器人模型            |
+| 标定  | **单圈编码器** + **收纳位上电标定**（不写 Flash 存多圈）；关节侧 **rad / rad/s** 与 MoveIt 统一（见第 8 节）                  |
+
 
 ### 1.2 不在本文范围
 
@@ -99,6 +101,8 @@ graph TB
     JSB -->|"/joint_states"| SV
 ```
 
+
+
 ### 2.2 物理拓扑
 
 ```text
@@ -153,15 +157,19 @@ sequenceDiagram
     end
 ```
 
-| 步骤 | 话题 / 接口 | 消息类型 | 说明 |
-|------|-------------|----------|------|
-| 1 | `/arm/move_to_point` | `robot_interfaces/srv/ArmMoveToPoint` | 应用入口，位姿 `[x,y,z,r,p,y]` |
-| 2 | MoveGroupInterface 内部 | action / service | 规划笛卡尔或关节路径 |
-| 3 | `move_group` → 控制器 | `control_msgs/action/FollowJointTrajectory` | `moveit_controllers.yaml` 中 `arm_controller` |
-| 4 | JTC 命令 | `trajectory_msgs/JointTrajectory` | 话题名由 ros2_control 生成，如 `/arm_controller/joint_trajectory` |
-| 5 | 硬件读写 | state/command interfaces | `position`（与现 `ros2_controllers.yaml` 一致） |
-| 6 | CAN | CAN 2.0 标准帧 | RPDO/TPDO，见第 6 节 |
-| 7 | 反馈 | `/joint_states` | `sensor_msgs/JointState`，供 MoveIt 与 TF |
+
+
+
+| 步骤  | 话题 / 接口               | 消息类型                                        | 说明                                                        |
+| --- | --------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| 1   | `/arm/move_to_point`  | `robot_interfaces/srv/ArmMoveToPoint`       | 应用入口，位姿 `[x,y,z,r,p,y]`                                   |
+| 2   | MoveGroupInterface 内部 | action / service                            | 规划笛卡尔或关节路径                                                |
+| 3   | `move_group` → 控制器    | `control_msgs/action/FollowJointTrajectory` | `moveit_controllers.yaml` 中 `arm_controller`              |
+| 4   | JTC 命令                | `trajectory_msgs/JointTrajectory`           | 话题名由 ros2_control 生成，如 `/arm_controller/joint_trajectory` |
+| 5   | 硬件读写                  | state/command interfaces                    | `position`（与现 `ros2_controllers.yaml` 一致）                 |
+| 6   | CAN                   | CAN 2.0 标准帧                                 | RPDO/TPDO，见第 6 节                                          |
+| 7   | 反馈                    | `/joint_states`                             | `sensor_msgs/JointState`，供 MoveIt 与 TF                    |
+
 
 ### 3.2 链路 B：MoveIt Servo 实时遥操作
 
@@ -184,12 +192,16 @@ sequenceDiagram
     R2C->>SV: /joint_states
 ```
 
-| 配置项 | 当前工程位置 | 真机注意点 |
-|--------|--------------|------------|
-| 输出话题 | `aubo_i5_moveit_config/config/servo.yaml` → `command_out_topic` | 保持指向 JTC 的 `joint_trajectory` |
-| 输入关节状态 | `joint_topic: /joint_states` | 必须来自真机反馈，禁止再用 Mock 假状态 |
-| 控制周期 | `publish_period: 0.034` (~30Hz) | 真机可先降到 20Hz，CAN + 驱动器稳定后再提高 |
-| JTC | `allow_nonzero_velocity_at_trajectory_end: true` | Servo 必需；真机需观察是否引起抖动 |
+
+
+
+| 配置项    | 当前工程位置                                                          | 真机注意点                         |
+| ------ | --------------------------------------------------------------- | ----------------------------- |
+| 输出话题   | `aubo_i5_moveit_config/config/servo.yaml` → `command_out_topic` | 保持指向 JTC 的 `joint_trajectory` |
+| 输入关节状态 | `joint_topic: /joint_states`                                    | 必须来自真机反馈，禁止再用 Mock 假状态        |
+| 控制周期   | `publish_period: 0.034` (~30Hz)                                 | 真机可先降到 20Hz，CAN + 驱动器稳定后再提高   |
+| JTC    | `allow_nonzero_velocity_at_trajectory_end: true`                | Servo 必需；真机需观察是否引起抖动          |
+
 
 ### 3.3 链路 C：仅状态监视（无运动）
 
@@ -204,12 +216,14 @@ STM32 TPDO → SocketCAN → CANopen Master → ros2_control read()
 
 ### 3.4 单位与坐标系约定
 
-| 量 | ROS / MoveIt | 建议 CANopen 从站内部 | 转换位置 |
-|----|--------------|----------------------|----------|
-| 关节角 | rad | 编码器 counts 或 0.001° 整数 | **ros2_control 硬件接口** 或主站驱动配置 |
-| 角速度 | rad/s | rpm 或 counts/s | 同上 |
-| 时间 | s | — | JTC 时间戳；CSP 以主站 SYNC 周期为基准 |
-| 末端位姿 | m, rad | — | MoveIt 运动学，不下发到 CAN |
+
+| 量    | ROS / MoveIt | 建议 CANopen 从站内部        | 转换位置                          |
+| ---- | ------------ | ---------------------- | ----------------------------- |
+| 关节角  | rad          | 编码器 counts 或 0.001° 整数 | **ros2_control 硬件接口** 或主站驱动配置 |
+| 角速度  | rad/s        | rpm 或 counts/s         | 同上                            |
+| 时间   | s            | —                      | JTC 时间戳；CSP 以主站 SYNC 周期为基准    |
+| 末端位姿 | m, rad       | —                      | MoveIt 运动学，不下发到 CAN           |
+
 
 **强制约定：** URDF 关节名、ros2_control 关节名、`JointState.name`、CANopen 轴序号四者一致（见第 6 节命名表）。  
 **位置与速度换算、收纳位上电标定**见第 8 节。
@@ -223,31 +237,29 @@ STM32 TPDO → SocketCAN → CANopen Master → ros2_control read()
 ```text
 ┌─────────────────────────────────────────┐
 │ 应用层 App                               │
-│  - CiA 402 状态机与用户回调               │
+│  - CiA 402 状态机与用户回调                │
 │  - 模式：Cyclic Synchronous Position     │
-│  - 目标位置 ← RPDO，实际位置 → TPDO       │
+│  - 目标位置 ← RPDO，实际位置 → TPDO        │
 ├─────────────────────────────────────────┤
-│ CANopenNode                              │
-│  - CO_NMT, CO_SDOserver, CO_PDO, CO_SYNC │
+│ CANopenNode                             │
+│  - CO_NMT, CO_SDOserver, CO_PDO, CO_SYNC│
 │  - 对象字典 OD（OD.c / OD.h）             │
 ├─────────────────────────────────────────┤
 │ CAN 驱动 CO_driver_target.h              │
-│  - CAN_Send / CAN_Receive / 定时 tick     │
+│  - CAN_Send / CAN_Receive / 定时 tick    │
 │  - 对接 STM32 HAL CAN 或寄存器            │
 ├─────────────────────────────────────────┤
-│ 电机控制（已有或并行开发）                 │
-│  - FOC、编码器、限位、过流、抱闸           │
+│ 电机控制（已有或并行开发）                  │
+│  - FOC、编码器、限位、过流、抱闸            │
 └─────────────────────────────────────────┘
 ```
 
 ### 4.2 CANopenNode 裸机集成要点
 
-1. **时钟滴答 `CO_TMR_TICK`**  
-   - 用 TIM 产生 1 ms（或栈要求的）tick，调用 `CO_process()` / `CO_NMT_process()` 等（按 CANopenNode 版本 API 为准）。
-
-2. **CAN 接收**  
-   - RX FIFO 中断中只做：**拷贝帧 → 入队**；在 main loop 或 1 ms tick 中调用栈处理，**禁止在 ISR 内跑 FOC**。
-
+1. **时钟滴答 `CO_TMR_TICK`**
+  - 用 TIM 产生 1 ms（或栈要求的）tick，调用 `CO_process()` / `CO_NMT_process()` 等（按 CANopenNode 版本 API 为准）。
+2. **CAN 接收**
+  - RX FIFO 中断中只做：**拷贝帧 → 入队**；在 main loop 或 1 ms tick 中调用栈处理，**禁止在 ISR 内跑 FOC**。
 3. **主循环结构（示例）**
 
 ```c
@@ -268,26 +280,28 @@ while (1)
 }
 ```
 
-4. **对象字典**  
-   - 使用 CANopenNode 配套 **OD 编辑器** 或手写 `OD.c`，导出 **EDS** 供上位机主站导入。
-
-5. **只读配置参数**  
-   - Node ID、波特率、`gear_ratio`、`counts_per_rev`、收纳位标定常量等可编译进 Flash **常量区**或出厂一次性烧录；**不在运行中反复写入 Flash 保存多圈位置**（见第 8.3 节收纳位方案）。STM32F4 **无片上 EEPROM**，若需可改写参数可考虑外置 I2C EEPROM，与本方案无硬性要求。
+1. **对象字典**
+  - 使用 CANopenNode 配套 **OD 编辑器** 或手写 `OD.c`，导出 **EDS** 供上位机主站导入。
+2. **只读配置参数**
+  - Node ID、波特率、`gear_ratio`、`counts_per_rev`、收纳位标定常量等可编译进 Flash **常量区**或出厂一次性烧录；**不在运行中反复写入 Flash 保存多圈位置**（见第 8.3 节收纳位方案）。STM32F4 **无片上 EEPROM**，若需可改写参数可考虑外置 I2C EEPROM，与本方案无硬性要求。
 
 ### 4.3 CiA 402 推荐配置（机械臂关节）
 
-| 项目 | 推荐 |
-|------|------|
-| 运行模式 `0x6060` | **8 — Cyclic Synchronous Position (CSP)** |
-| 主站周期 | 与 JTC `update_rate` 对齐，建议 **2–10 ms**；可用 SYNC 同步多轴 |
-| RPDO | 控制字 `0x6040` + 目标位置 `0x607A`（可拆两帧或压缩映射） |
-| TPDO | 状态字 `0x6041` + 实际位置 `0x6064` + 可选实际力矩 `0x6077` |
-| 使能 | 严格按 402 状态机；Fault 时关 PWM，并置 `0x6041` 故障位 |
-| 心跳 `0x1017` | 建议 200–1000 ms，主站监控掉线 |
+
+| 项目            | 推荐                                                 |
+| ------------- | -------------------------------------------------- |
+| 运行模式 `0x6060` | **8 — Cyclic Synchronous Position (CSP)**          |
+| 主站周期          | 与 JTC `update_rate` 对齐，建议 **2–10 ms**；可用 SYNC 同步多轴 |
+| RPDO          | 控制字 `0x6040` + 目标位置 `0x607A`（可拆两帧或压缩映射）            |
+| TPDO          | 状态字 `0x6041` + 实际位置 `0x6064` + 可选实际力矩 `0x6077`     |
+| 使能            | 严格按 402 状态机；Fault 时关 PWM，并置 `0x6041` 故障位           |
+| 心跳 `0x1017`   | 建议 200–1000 ms，主站监控掉线                              |
+
 
 **为何选 CSP：** MoveIt / JTC / Servo 在上位机产生**时间Parameterized 关节轨迹**，主站每周期下发**下一时刻目标位置**，与当前 Arm-ZayV2 的 `position` 命令接口一致。
 
 ### 4.4 安全行为（下位机必须实现）
+
 
 | 事件                            | 行为                      |
 | ----------------------------- | ----------------------- |
@@ -296,6 +310,7 @@ while (1)
 | 过流、过温、欠压                      | 本地 Fault + EMCY + 关 PWM |
 | 心跳超时（若配置消费者心跳）                | 安全停车                    |
 | CAN Bus-off                   | 恢复策略 + 禁止运动直至恢复         |
+
 
 ### 4.5 固件工程建议目录
 
@@ -321,15 +336,17 @@ firmware/joint_canopen_drive/        # 可独立 Git 仓库
 
 ### 5.1 推荐软件栈
 
-| 组件 | 推荐选型 | 作用 |
-|------|----------|------|
-| CAN 设备驱动 | `gs_usb` / `peak_usb` / `socketcan_fd` 等内核模块 | 创建 `can0` |
-| 调试 | `can-utils`（`candump` / `cansend`） | 总线排障 |
-| CANopen 主站 | **[ros2_canopen](https://github.com/ros-industrial/ros2_canopen)**（Humble 分支） | NMT、SDO、PDO、402 驱动 |
-| 机器人控制 | `ros2_control` + `controller_manager` | 与现工程一致 |
-| 402 集成 | `canopen_402_driver` + `canopen_ros2_control` | 将各从站映射为 ros2_control 关节 |
-| 运动规划 | MoveIt 2 + 自研 `*_moveit_config` | 替换 `aubo_i5_moveit_config` |
-| 应用 | 现有 `arm_control` 包 | **无需改协议**，仍走 MoveGroup |
+
+| 组件         | 推荐选型                                                                          | 作用                         |
+| ---------- | ----------------------------------------------------------------------------- | -------------------------- |
+| CAN 设备驱动   | `gs_usb` / `peak_usb` / `socketcan_fd` 等内核模块                                  | 创建 `can0`                  |
+| 调试         | `can-utils`（`candump` / `cansend`）                                            | 总线排障                       |
+| CANopen 主站 | **[ros2_canopen](https://github.com/ros-industrial/ros2_canopen)**（Humble 分支） | NMT、SDO、PDO、402 驱动         |
+| 机器人控制      | `ros2_control` + `controller_manager`                                         | 与现工程一致                     |
+| 402 集成     | `canopen_402_driver` + `canopen_ros2_control`                                 | 将各从站映射为 ros2_control 关节    |
+| 运动规划       | MoveIt 2 + 自研 `*_moveit_config`                                               | 替换 `aubo_i5_moveit_config` |
+| 应用         | 现有 `arm_control` 包                                                            | **无需改协议**，仍走 MoveGroup     |
+
 
 **备选（不推荐首选）：** 自写 `hardware_interface::SystemInterface`，内部调用 Lely CANopen 或简易主站——工作量大、与标准工具链脱节。
 
@@ -382,7 +399,7 @@ arm_controller:
     allow_nonzero_velocity_at_trajectory_end: true  # Servo 需要
 ```
 
-**`moveit_controllers.yaml`** 保持 `FollowJointTrajectory` → `arm_controller`。
+`**moveit_controllers.yaml**` 保持 `FollowJointTrajectory` → `arm_controller`。
 
 ### 5.5 CANopen + ros2_control 配置思路
 
@@ -414,12 +431,14 @@ nodes:
 
 ### 5.6 Launch 分工
 
-| Launch | 用途 |
-|--------|------|
-| `zay_arm_mock.launch.py` | 保留 `GenericSystem`，无 CAN 硬件开发 MoveIt / arm_control |
-| `zay_arm_canopen.launch.py` | 拉起 can0、CANopen 主站、ros2_control、move_group |
-| `arm_control.launch.py` | 改为 include `zay_arm_canopen` + `arm_driver_node` |
-| `servo_demo.launch.py` | 同上，真机降低 Servo 速度 scale |
+
+| Launch                      | 用途                                                 |
+| --------------------------- | -------------------------------------------------- |
+| `zay_arm_mock.launch.py`    | 保留 `GenericSystem`，无 CAN 硬件开发 MoveIt / arm_control |
+| `zay_arm_canopen.launch.py` | 拉起 can0、CANopen 主站、ros2_control、move_group         |
+| `arm_control.launch.py`     | 改为 include `zay_arm_canopen` + `arm_driver_node`   |
+| `servo_demo.launch.py`      | 同上，真机降低 Servo 速度 scale                             |
+
 
 ---
 
@@ -427,39 +446,47 @@ nodes:
 
 ### 6.1 轴编号与 Node ID
 
-| 机械臂关节 | URDF joint 名（示例） | Node ID | 备注 |
-|------------|----------------------|---------|------|
-| J1 | `joint1` | 11 | 远离基座侧编号规则写入手册 |
-| J2 | `joint2` | 12 | |
-| J3 | `joint3` | 13 | |
-| J4 | `joint4` | 14 | |
-| J5 | `joint5` | 15 | |
-| J6 | `joint6` | 16 | |
+
+| 机械臂关节 | URDF joint 名（示例） | Node ID | 备注            |
+| ----- | ---------------- | ------- | ------------- |
+| J1    | `joint1`         | 11      | 远离基座侧编号规则写入手册 |
+| J2    | `joint2`         | 12      |               |
+| J3    | `joint3`         | 13      |               |
+| J4    | `joint4`         | 14      |               |
+| J5    | `joint5`         | 15      |               |
+| J6    | `joint6`         | 16      |               |
+
 
 > 当前 `aubo_i5` 使用 `shoulder_joint` 等命名；自研臂建议统一为 `joint1`–`joint6` 或自有命名，**全程一致**即可。
 
 ### 6.2 TPDO1（从站 → 主站，周期发送）
 
-| OD 对象 | 索引 | 长度 | 说明 |
-|---------|------|------|------|
-| Statusword | `0x6041` | 16 bit | CiA 402 状态 |
-| Position actual | `0x6064` | 32 bit | 编码器位置 |
+
+| OD 对象           | 索引       | 长度     | 说明         |
+| --------------- | -------- | ------ | ---------- |
+| Statusword      | `0x6041` | 16 bit | CiA 402 状态 |
+| Position actual | `0x6064` | 32 bit | 编码器位置      |
+
 
 ### 6.3 RPDO1（主站 → 从站，SYNC 或事件触发）
 
-| OD 对象 | 索引 | 长度 | 说明 |
-|---------|------|------|------|
-| Controlword | `0x6040` | 16 bit | 使能 / 清故障 |
-| Target position | `0x607A` | 32 bit | CSP 目标 |
+
+| OD 对象           | 索引       | 长度     | 说明       |
+| --------------- | -------- | ------ | -------- |
+| Controlword     | `0x6040` | 16 bit | 使能 / 清故障 |
+| Target position | `0x607A` | 32 bit | CSP 目标   |
+
 
 ### 6.4 SDO（调试与配置）
 
-| 用途 | 典型索引 |
-|------|----------|
-| 运行模式 | `0x6060` |
-| 心跳生产者时间 | `0x1017` |
+
+| 用途         | 典型索引                 |
+| ---------- | -------------------- |
+| 运行模式       | `0x6060`             |
+| 心跳生产者时间    | `0x1017`             |
 | 位置因子 / 齿轮比 | `0x6091`, `0x608F` 等 |
-| 软件位置限位 | 厂商自定义或 `0x607D` 区域 |
+| 软件位置限位     | 厂商自定义或 `0x607D` 区域   |
+
 
 上电配置阶段用 SDO；运行阶段**仅 PDO**，避免 SDO 占用总线带宽。
 
@@ -468,6 +495,7 @@ nodes:
 ## 7. 时序与带宽
 
 ### 7.1 频率建议
+
 
 | 环节                 | 频率                    | 说明                                    |
 | ------------------ | --------------------- | ------------------------------------- |
@@ -478,6 +506,7 @@ nodes:
 | MoveIt Servo 输出    | ~30 Hz                | `servo.yaml` `publish_period`         |
 | `/joint_states` 发布 | 100 Hz                | `joint_state_broadcaster`             |
 | Heartbeat          | 10 Hz                 | 每从站                                   |
+
 
 ### 7.2 CAN 负载粗算
 
@@ -497,18 +526,22 @@ nodes:
 
 ### 8.1 电机侧 vs 关节侧
 
-| 名称 | 含义 | MoveIt / ROS 使用 |
-|------|------|-------------------|
-| **电机侧** | 电机轴上的单圈编码器计数 + 软件累加的多圈量 | 不直接暴露给 MoveIt |
-| **关节侧** | 减速器输出轴（URDF 关节轴）角度与角速度 | `joint_states`、规划、Servo、限位 |
+
+| 名称      | 含义                      | MoveIt / ROS 使用            |
+| ------- | ----------------------- | -------------------------- |
+| **电机侧** | 电机轴上的单圈编码器计数 + 软件累加的多圈量 | 不直接暴露给 MoveIt              |
+| **关节侧** | 减速器输出轴（URDF 关节轴）角度与角速度  | `joint_states`、规划、Servo、限位 |
+
 
 各轴独立参数（可不同）：
 
-| 符号 | 含义 |
-|------|------|
-| `gear_ratio` | 电机转 `gear_ratio` 圈 → 关节转 1 圈（按机械定义写入手册，全程一致） |
-| `counts_per_rev` | 单圈编码器每电机圈的计数分辨率（如 4096、16384） |
-| `sign` | 关节正方向与编码器正方向是否一致，取 `+1` 或 `-1` |
+
+| 符号               | 含义                                           |
+| ---------------- | -------------------------------------------- |
+| `gear_ratio`     | 电机转 `gear_ratio` 圈 → 关节转 1 圈（按机械定义写入手册，全程一致） |
+| `counts_per_rev` | 单圈编码器每电机圈的计数分辨率（如 4096、16384）                |
+| `sign`           | 关节正方向与编码器正方向是否一致，取 `+1` 或 `-1`               |
+
 
 ### 8.2 位置换算
 
@@ -548,12 +581,14 @@ joint_rad = counts_motor_to_joint_rad(total_counts);
 
 #### 8.4.1 前提条件
 
-| 条件 | 说明 |
-|------|------|
-| 姿态唯一 | 收纳位在各关节工作空间内对应 **唯一** 的一组电机圈数；多圈关节不能存在两种不同圈数却外观相近的姿势 |
-| 可重复 | 建议 **机械挡块 / 销钉 / 折叠止挡**，不仅靠目视 |
-| 先摆后上电 | 上电瞬间已在收纳位；上电后再挪动会导致标定错误 |
-| 行程限制 | 若某关节连杆侧行程 **超过 360°** 且收纳位不能唯一确定圈数，必须加机械限位或改用多圈绝对值编码器 |
+
+| 条件    | 说明                                                    |
+| ----- | ----------------------------------------------------- |
+| 姿态唯一  | 收纳位在各关节工作空间内对应 **唯一** 的一组电机圈数；多圈关节不能存在两种不同圈数却外观相近的姿势  |
+| 可重复   | 建议 **机械挡块 / 销钉 / 折叠止挡**，不仅靠目视                         |
+| 先摆后上电 | 上电瞬间已在收纳位；上电后再挪动会导致标定错误                               |
+| 行程限制  | 若某关节连杆侧行程 **超过 360°** 且收纳位不能唯一确定圈数，必须加机械限位或改用多圈绝对值编码器 |
+
 
 #### 8.4.2 出厂标定（每轴做一次，写入固件常量）
 
@@ -582,6 +617,8 @@ stateDiagram-v2
     Fault --> NoTorque: 禁止 PWM / CSP，LED 报警
 ```
 
+
+
 **校验逻辑（每轴）：**
 
 ```c
@@ -599,15 +636,17 @@ else {
 
 #### 8.4.4 掉电与异常
 
-| 场景 | 处理 |
-|------|------|
-| 正常关机前臂在任意姿态 | 下次必须先摆回收纳位再 **重新上电** 或 **软复位重新校验** |
-| 校验失败 | 禁止运动；主站不加载 `arm_controller` 或仅监视 `joint_states` |
-| 可选人工确认 | 主站服务 `/arm/confirm_storage_pose` 或 SDO 清「未标定」标志（机械挡块可靠时可全自动） |
+
+| 场景          | 处理                                                           |
+| ----------- | ------------------------------------------------------------ |
+| 正常关机前臂在任意姿态 | 下次必须先摆回收纳位再 **重新上电** 或 **软复位重新校验**                           |
+| 校验失败        | 禁止运动；主站不加载 `arm_controller` 或仅监视 `joint_states`              |
+| 可选人工确认      | 主站服务 `/arm/confirm_storage_pose` 或 SDO 清「未标定」标志（机械挡块可靠时可全自动） |
+
 
 #### 8.4.5 与 CANopen / ROS 的衔接
 
-- 状态字 `0x6041` 或厂商对象（如 `0x2000`）增加 **`Homed` / `PoseVerified`** 位。
+- 状态字 `0x6041` 或厂商对象（如 `0x2000`）增加 `**Homed` / `PoseVerified`** 位。
 - **未 Homed**：不输出力矩；主站轮询全部为真后再 `spawn` `arm_controller`。
 - `joint_state_broadcaster` 发布的 `position` 必须为 **关节侧 rad**，与 URDF 一致。
 
@@ -631,13 +670,15 @@ counts_per_sec = sign × ω_joint / (2π) × gear_ratio × counts_per_rev
 
 #### 8.5.2 各层限速职责
 
-| 层级 | 配置 | 单位 | 作用 |
-|------|------|------|------|
-| MoveIt | `joint_limits.yaml` 每轴 `max_velocity` / `max_acceleration` | rad, rad/s | 规划轨迹上限；各轴可不同 |
-| `arm_control` | `max_velocity_scaling_factor` 等 | 0~1 缩放 | 全局再降速 |
-| JTC | 轨迹点时间戳 | s | 隐含各轴 `ω_joint` |
-| CSP 从站固件 | `joint_max_velocity_rad_s`、`joint_max_accel_rad_s2` | rad/s | 对 RPDO 目标做差分限幅，防止主站过快 |
-| 电机驱动器 | `motor_max_rpm` | rpm | 硬限制，防止超速 |
+
+| 层级            | 配置                                                         | 单位         | 作用                    |
+| ------------- | ---------------------------------------------------------- | ---------- | --------------------- |
+| MoveIt        | `joint_limits.yaml` 每轴 `max_velocity` / `max_acceleration` | rad, rad/s | 规划轨迹上限；各轴可不同          |
+| `arm_control` | `max_velocity_scaling_factor` 等                            | 0~1 缩放     | 全局再降速                 |
+| JTC           | 轨迹点时间戳                                                     | s          | 隐含各轴 `ω_joint`        |
+| CSP 从站固件      | `joint_max_velocity_rad_s`、`joint_max_accel_rad_s2`        | rad/s      | 对 RPDO 目标做差分限幅，防止主站过快 |
+| 电机驱动器         | `motor_max_rpm`                                            | rpm        | 硬限制，防止超速              |
+
 
 **CSP 周期内从站限速示例：**
 
@@ -661,42 +702,48 @@ Servo 将笛卡尔速度通过雅可比映射为各轴 `ω_joint`；各轴是否
 
 ### 8.6 每轴参数存放建议
 
-| 参数 | 存放位置 | 说明 |
-|------|----------|------|
-| `gear_ratio`, `counts_per_rev`, `sign` | 各关节驱动器固件常量 | 与机械绑定 |
-| `storage_raw`, `storage_joint_rad`, `tolerance` | 各关节驱动器固件常量 | 收纳位标定结果 |
-| `max_velocity`, `max_acceleration` | `joint_limits.yaml` | 规划用，关节侧 |
-| `joint_max_velocity_rad_s` | 固件常量或与 yaml 一致 | 从站安全限速 |
-| rad ↔ counts 运行时换算 | **固件** | 主站保持单位统一 |
+
+| 参数                                              | 存放位置                | 说明       |
+| ----------------------------------------------- | ------------------- | -------- |
+| `gear_ratio`, `counts_per_rev`, `sign`          | 各关节驱动器固件常量          | 与机械绑定    |
+| `storage_raw`, `storage_joint_rad`, `tolerance` | 各关节驱动器固件常量          | 收纳位标定结果  |
+| `max_velocity`, `max_acceleration`              | `joint_limits.yaml` | 规划用，关节侧  |
+| `joint_max_velocity_rad_s`                      | 固件常量或与 yaml 一致      | 从站安全限速   |
+| rad ↔ counts 运行时换算                              | **固件**              | 主站保持单位统一 |
+
 
 ### 8.7 对象字典扩展建议（厂商区域）
 
-| 对象 | 类型 | 说明 |
-|------|------|------|
+
+| 对象       | 类型     | 说明                                    |
+| -------- | ------ | ------------------------------------- |
 | `0x2000` | UINT16 | 驱动状态位：`bit0=Homed`，`bit1=PoseError`，… |
-| `0x2001` | INT32 | 只读：校验失败时 `raw - storage_raw` 差值，便于调试 |
-| `0x2100` | INT32 | 只读：`gear_ratio × 1000` 或分子项 |
-| `0x2101` | UINT32 | 只读：`counts_per_rev` |
+| `0x2001` | INT32  | 只读：校验失败时 `raw - storage_raw` 差值，便于调试  |
+| `0x2100` | INT32  | 只读：`gear_ratio × 1000` 或分子项           |
+| `0x2101` | UINT32 | 只读：`counts_per_rev`                   |
+
 
 上电标定与使能前，主站可通过 SDO 读 `0x2000` 确认整机就绪。
 
 ### 8.8 实施检查清单
 
-- [ ] 各轴 `gear_ratio` / `sign` 单轴小角度验证方向正确
-- [ ] 收纳位机械止挡重复精度满足 `verify_tolerance_counts`
-- [ ] 上电未摆放到位时 **无法使能**
-- [ ] RViz 模型与收纳位真机姿态一致
-- [ ] `joint_limits.yaml` 中各轴 `max_velocity` 已按真实机械能力区分设置
-- [ ] Servo 与 MoveIt 规划均在关节侧 rad/s 理解下测试，而非对比电机 RPM
+- 各轴 `gear_ratio` / `sign` 单轴小角度验证方向正确
+- 收纳位机械止挡重复精度满足 `verify_tolerance_counts`
+- 上电未摆放到位时 **无法使能**
+- RViz 模型与收纳位真机姿态一致
+- `joint_limits.yaml` 中各轴 `max_velocity` 已按真实机械能力区分设置
+- Servo 与 MoveIt 规划均在关节侧 rad/s 理解下测试，而非对比电机 RPM
 
 ### 8.9 常见错误
 
-| 现象 | 原因 |
-|------|------|
+
+| 现象                | 原因                                                                     |
+| ----------------- | ---------------------------------------------------------------------- |
 | MoveIt 规划与真机姿态偏差大 | 将电机 raw counts 直接当作 `joint_states`；或收纳位 `storage_joint_rad` 与 URDF 不一致 |
-| 某轴特别容易超速饱和 | 该轴 `gear_ratio` 填反或 `joint_limits` 未单独限制 |
-| 掉电后上电乱动 | 未摆回收纳位仍使能；应强制 `Homed` 门控 |
-| 跨圈跳变 | 未做 8.3 节半圈阈值累加；或校验容差过大 |
+| 某轴特别容易超速饱和        | 该轴 `gear_ratio` 填反或 `joint_limits` 未单独限制                               |
+| 掉电后上电乱动           | 未摆回收纳位仍使能；应强制 `Homed` 门控                                               |
+| 跨圈跳变              | 未做 8.3 节半圈阈值累加；或校验容差过大                                                 |
+
 
 ---
 
@@ -719,12 +766,14 @@ Servo 将笛卡尔速度通过雅可比映射为各轴 `ω_joint`；各轴是否
 
 ### 9.3 日志与诊断
 
-| 层级 | 手段 |
-|------|------|
-| CAN | `candump -l` 录包 |
-| 从站 | SWO/RTT 打印 Fault 码 |
-| ROS | `ros2 topic echo /joint_states`、`controller_manager` 列表 |
-| MoveIt | `move_group` 日志、规划失败原因 |
+
+| 层级     | 手段                                                      |
+| ------ | ------------------------------------------------------- |
+| CAN    | `candump -l` 录包                                         |
+| 从站     | SWO/RTT 打印 Fault 码                                      |
+| ROS    | `ros2 topic echo /joint_states`、`controller_manager` 列表 |
+| MoveIt | `move_group` 日志、规划失败原因                                  |
+
 
 ---
 
@@ -732,92 +781,100 @@ Servo 将笛卡尔速度通过雅可比映射为各轴 `ω_joint`；各轴是否
 
 ### 阶段 0：单轴 CANopen 从站
 
-- [ ] STM32 裸机跑通 CANopenNode，Heartbeat + SDO 读版本
-- [ ] 导出 EDS，`candump` 能看到 TPDO
-- [ ] 402 使能 + CSP，单轴小角度摆动
-- [ ] 收纳位标定逻辑：校验通过置 `Homed`，失败禁止使能
+- STM32 裸机跑通 CANopenNode，Heartbeat + SDO 读版本
+- 导出 EDS，`candump` 能看到 TPDO
+- 402 使能 + CSP，单轴小角度摆动
+- 收纳位标定逻辑：校验通过置 `Homed`，失败禁止使能
 
 ### 阶段 1：单轴接上 PC 主站
 
-- [ ] `ip link` 配置 can0
-- [ ] ros2_canopen 识别从站，SDO 配置 PDO
-- [ ] ros2_control 单关节 `position` 读写，`joint_state_publisher` 与手扳一致
+- `ip link` 配置 can0
+- ros2_canopen 识别从站，SDO 配置 PDO
+- ros2_control 单关节 `position` 读写，`joint_state_publisher` 与手扳一致
 
 ### 阶段 2：6 轴总线 + JTC
 
-- [ ] 6 从站并联，SYNC 同步
-- [ ] 加载 `arm_controller`，`ros2 action send_goal` 小幅度轨迹
-- [ ] `open_loop_control: false` 验证跟踪误差
+- 6 从站并联，SYNC 同步
+- 加载 `arm_controller`，`ros2 action send_goal` 小幅度轨迹
+- `open_loop_control: false` 验证跟踪误差
 
 ### 阶段 3：MoveIt
 
-- [ ] 自研 URDF/SRDF，`move_group` 规划 + 执行
-- [ ] RViz 模型与真机一致（收纳位上电标定 + `storage_pose` 核对）
+- 自研 URDF/SRDF，`move_group` 规划 + 执行
+- RViz 模型与真机一致（收纳位上电标定 + `storage_pose` 核对）
 
 ### 阶段 4：arm_control 服务
 
-- [ ] `arm_control.launch.py` 切到真机 config
-- [ ] 调用 `/arm/move_to_point`、`/arm/set_preset_pose`
+- `arm_control.launch.py` 切到真机 config
+- 调用 `/arm/move_to_point`、`/arm/set_preset_pose`
 
 ### 阶段 5：Servo
 
-- [ ] `servo_demo.launch.py`，极低 `linear_speed` / `scale`
-- [ ] 确认 `allow_nonzero_velocity_at_trajectory_end` 下无危险振荡
+- `servo_demo.launch.py`，极低 `linear_speed` / `scale`
+- 确认 `allow_nonzero_velocity_at_trajectory_end` 下无危险振荡
 
 ---
 
 ## 11. 与现有代码的修改清单
 
-| 文件 / 包 | 修改内容 |
-|-----------|----------|
-| `robot_ros_description` | 自研臂 URDF、关节限位、碰撞体 |
-| `*_moveit_config` | 新建；复制 `aubo_i5` 结构，换 xacro 与关节名 |
-| `*.ros2_control.xacro` | `GenericSystem` → CANopen 硬件插件 |
-| `ros2_controllers.yaml` | 关节名列表、`open_loop_control` |
-| `arm_control/launch/*.py` | `MoveItConfigsBuilder` 包名、真机 launch 参数 |
-| `arm_control` C++ | **通常不改**；可选增加急停服务、连接状态 |
-| `firmware/` | 新建 CANopenNode 工程；`joint_calib.c` 实现收纳位与换算 |
+
+| 文件 / 包                    | 修改内容                                       |
+| ------------------------- | ------------------------------------------ |
+| `robot_ros_description`   | 自研臂 URDF、关节限位、碰撞体                          |
+| `*_moveit_config`         | 新建；复制 `aubo_i5` 结构，换 xacro 与关节名            |
+| `*.ros2_control.xacro`    | `GenericSystem` → CANopen 硬件插件             |
+| `ros2_controllers.yaml`   | 关节名列表、`open_loop_control`                  |
+| `arm_control/launch/*.py` | `MoveItConfigsBuilder` 包名、真机 launch 参数     |
+| `arm_control` C++         | **通常不改**；可选增加急停服务、连接状态                     |
+| `firmware/`               | 新建 CANopenNode 工程；`joint_calib.c` 实现收纳位与换算 |
+
 
 ---
 
 ## 12. 风险与对策
 
-| 风险                          | 对策                                   |
-| --------------------------- | ------------------------------------ |
-| 关节名不一致导致 MoveIt 拒动          | 统一 URDF / yaml / EDS 命名，启动时检查        |
-| CSP 周期抖动                    | 主站固定周期线程；必要时 SYNC；下位机插值              |
-| Servo 真机振荡                  | 降 scale、加大滤波、先关碰撞再逐步开启               |
-| Bus-off / 接线错误              | 示波器 / `candump`；终端电阻与拓扑检查            |
-| 零位 / 圈数错误导致笛卡尔偏差 | 严格执行收纳位上电 SOP；`Homed` 门控；SRDF `storage_pose` 与固件常量一致（见第 8 节） |
-| 各轴减速比不同导致速度理解混乱 | 统一在关节侧 rad/s 限幅；固件内按 `gear_ratio` 换算（见第 8.5 节） |
-| ros2_canopen 版本与 Humble 不匹配 | 锁定 git tag，写入 `docs/requirements.md` |
+
+| 风险                          | 对策                                                           |
+| --------------------------- | ------------------------------------------------------------ |
+| 关节名不一致导致 MoveIt 拒动          | 统一 URDF / yaml / EDS 命名，启动时检查                                |
+| CSP 周期抖动                    | 主站固定周期线程；必要时 SYNC；下位机插值                                      |
+| Servo 真机振荡                  | 降 scale、加大滤波、先关碰撞再逐步开启                                       |
+| Bus-off / 接线错误              | 示波器 / `candump`；终端电阻与拓扑检查                                    |
+| 零位 / 圈数错误导致笛卡尔偏差            | 严格执行收纳位上电 SOP；`Homed` 门控；SRDF `storage_pose` 与固件常量一致（见第 8 节） |
+| 各轴减速比不同导致速度理解混乱             | 统一在关节侧 rad/s 限幅；固件内按 `gear_ratio` 换算（见第 8.5 节）               |
+| ros2_canopen 版本与 Humble 不匹配 | 锁定 git tag，写入 `docs/requirements.md`                         |
+
 
 ---
 
 ## 13. 参考资源
 
-| 资源 | 链接 / 说明 |
-|------|-------------|
-| CANopenNode | https://github.com/CANopenNode/CANopenNode |
-| CiA 402 概要 | CAN in Automation DS402 |
-| ros2_canopen | https://github.com/ros-industrial/ros2_canopen |
-| 本项目 MoveIt 栈 | `docs/moveit2-overview.md` |
-| 本项目 Servo | `docs/moveit-servo.md` |
-| 当前仿真 launch | `src/arm_control/launch/arm_control.launch.py` |
-| SocketCAN | Linux Kernel Documentation — CAN |
+
+| 资源           | 链接 / 说明                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| CANopenNode  | [https://github.com/CANopenNode/CANopenNode](https://github.com/CANopenNode/CANopenNode)         |
+| CiA 402 概要   | CAN in Automation DS402                                                                          |
+| ros2_canopen | [https://github.com/ros-industrial/ros2_canopen](https://github.com/ros-industrial/ros2_canopen) |
+| 本项目 MoveIt 栈 | `docs/moveit2-overview.md`                                                                       |
+| 本项目 Servo    | `docs/moveit-servo.md`                                                                           |
+| 当前仿真 launch  | `src/arm_control/launch/arm_control.launch.py`                                                   |
+| SocketCAN    | Linux Kernel Documentation — CAN                                                                 |
+
 
 ---
 
 ## 14. 附录：话题 / 服务速查（真机运行时）
 
-| 名称 | 类型 | 方向 |
-|------|------|------|
-| `/joint_states` | `sensor_msgs/JointState` | 发布 |
-| `/arm_controller/follow_joint_trajectory` | `control_msgs/action/FollowJointTrajectory` | action 服务器 |
-| `/arm_controller/joint_trajectory` | `trajectory_msgs/JointTrajectory` | Servo 常作为命令输入 |
-| `/arm/move_to_point` | `robot_interfaces/srv/ArmMoveToPoint` | 服务 |
-| `/arm/set_preset_pose` | `robot_interfaces/srv/SetPresetPose` | 服务；收纳位可定义为 SRDF 命名位姿 |
-| `/delta_twist_cmds` 或 servo 命名空间内 | `geometry_msgs/TwistStamped` | Servo 笛卡尔输入 |
+
+| 名称                                        | 类型                                          | 方向                   |
+| ----------------------------------------- | ------------------------------------------- | -------------------- |
+| `/joint_states`                           | `sensor_msgs/JointState`                    | 发布                   |
+| `/arm_controller/follow_joint_trajectory` | `control_msgs/action/FollowJointTrajectory` | action 服务器           |
+| `/arm_controller/joint_trajectory`        | `trajectory_msgs/JointTrajectory`           | Servo 常作为命令输入        |
+| `/arm/move_to_point`                      | `robot_interfaces/srv/ArmMoveToPoint`       | 服务                   |
+| `/arm/set_preset_pose`                    | `robot_interfaces/srv/SetPresetPose`        | 服务；收纳位可定义为 SRDF 命名位姿 |
+| `/delta_twist_cmds` 或 servo 命名空间内         | `geometry_msgs/TwistStamped`                | Servo 笛卡尔输入          |
+
 
 ---
 
