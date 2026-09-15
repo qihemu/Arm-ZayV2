@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>damiao_core</name>
+    <version>0.1.0</version>
+    <description>ROS-independent Damiao protocol and SocketCAN library skeleton.</description>
+    <maintainer email="2389954298@qq.com">wlzc</maintainer>
+    <license>TODO: License declaration</license>
+
+    <buildtool_depend>cmake</buildtool_depend>
+
+    <!-- 仅用于 colcon 发现；核心构建不依赖 ament。 -->
+    <export>
+        <build_type>cmake</build_type>
+    </export>
+</package>

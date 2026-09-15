@@ -1,0 +1,5 @@
+@PACKAGE_INIT@
+
+# 消费者通过 damiao_core::damiao_core 获取头文件和动态库。
+include("${CMAKE_CURRENT_LIST_DIR}/damiao_coreTargets.cmake")
+check_required_components(damiao_core)
