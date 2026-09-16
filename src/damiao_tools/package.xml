@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>damiao_tools</name>
+    <version>0.1.0</version>
+    <description>Minimal interactive single-motor link test tool for damiao_core.</description>
+    <maintainer email="2389954298@qq.com">wlzc</maintainer>
+    <license>TODO: License declaration</license>
+
+    <buildtool_depend>cmake</buildtool_depend>
+    <depend>damiao_core</depend>
+    <depend>yaml-cpp</depend>
+
+    <!-- 仅用于 colcon 发现；工具保持普通 CMake 构建。 -->
+    <export>
+        <build_type>cmake</build_type>
+    </export>
+</package>

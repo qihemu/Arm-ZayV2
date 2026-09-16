@@ -1,0 +1,7 @@
+# 单电机链路测试配置。以下限位是占位符，核对台架后再填写，不能直接用于真机运动。
+can_interface: can0
+esc_id: 1
+mst_id: 17
+min_output_position_rad: null
+max_output_position_rad: null
+max_output_speed_rad_s: null

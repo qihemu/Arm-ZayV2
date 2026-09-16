@@ -7,7 +7,7 @@
 
 本文整合实体机械臂缺口分析、ros2_control 硬件插件设计，以及可独立运行的多电机调试工具方案，供后续编码、联调和验收使用。本文中的“应”“必须”为拟定的开发要求，不表示相应功能已经实现。
 
-**实现进展（2026-09-16）：项目已有 MoveIt、轨迹控制器和 Mock 硬件链路；`damiao_core` 已实现首版协议、SocketCAN、六轴缓存、维护事务和发送门控，当前能力与限制见 [核心库说明](../src/damiao_core/README.md)。CLI/GUI 和真实 `SystemInterface` 插件尚未交付。核心库仅完成软件验证，vcan 与实体固件行为仍待验证；本轮未配置 CAN、刷写设备或驱动电机。本文其余“设计要求”和待实测项不因核心库编码完成而自动视为通过。**
+**实现进展（2026-09-16）：项目已有 MoveIt、轨迹控制器和 Mock 硬件链路；`damiao_core` 已实现首版协议、SocketCAN、六轴缓存、维护事务和发送门控，当前能力与限制见 [核心库说明](../src/damiao_core/README.md)。`damiao_tools` 已实现最小单电机交互式链路测试工具，只覆盖严格 YAML 加载、注册、状态、使能、位置速度驱动和显式失能；完整调试会话、GUI 和真实 `SystemInterface` 插件尚未交付。核心库和工具仅完成模拟传输软件验证，vcan 与实体固件行为仍待验证；本轮未配置 CAN、刷写设备或驱动电机。本文其余“设计要求”和待实测项不因软件编码完成而自动视为通过。**
 
 文中的接口、目录、命令行和配置示例都是设计草案；标为模板的配置不能直接用于真机运动。硬件参数必须由实际设备读取、机械设计和实测结果补全。
 
@@ -676,45 +676,39 @@ JTC inactive 不等于插件已关闭 CAN；硬件 inactive 也不自动证明�
 
 ### 12.1 CLI 功能分组
 
-拟定可执行文件名 `damiao_motor_tool`，与旧文档中的未交付工具区分。命令名称为设计稿。
+当前最小可执行文件名为 `damiao_motor_tool`。程序从 YAML 加载一台电机，启动时自动注册、连接、同步参数并查询状态，随后使用阻塞式 REPL 等待命令。CAN 接收和 100 Hz 运动保持由后台线程执行。
 
 
-| 分组   | 命令示意                                             | 行为                       |
-| ---- | ------------------------------------------------ | ------------------------ |
-| 配置检查 | `config validate`                                | 本地检查格式、ID、字段和限制，不连接设备    |
-| 设备检查 | `scan` / `inspect`                               | 在已知地址范围限时查询，显示在线信息和不确定结果 |
-| 状态   | `monitor` / `record`                             | 区分被动监听和主动维护查询，输出每轴新鲜度    |
-| 参数   | `param read` / `param write`                     | 类型化操作，写后读回；不自动持久化        |
-| 配置文件 | `config export` / `config diff` / `config apply` | 展示差异和逐台结果                |
-| 持久化  | `param save`                                     | 在失能维护状态下显式保存             |
-| 标定   | `zero save`                                      | 显示影响并要求明确选择，更新标定状态       |
-| 运动会话 | `session`                                        | 在持续会话内执行选择、使能、运动、停止和失能   |
+| 命令 | 当前行为 |
+| ---- | -------- |
+| `status` | 维护态主动查询、控制态读取缓存，显示位置、速度、状态、温度和反馈年龄 |
+| `enable` | 从当前反馈位置建立保持目标，显式使能并启动 100 Hz 周期发送 |
+| `drive <position_rad> <speed_rad_s>` | 更新输出轴绝对位置及最大绝对速度，按 YAML 限位拒绝非法值 |
+| `disable` | 停止周期发送、撤销控制许可并显式失能 |
+| `help` / `quit` | 显示命令或关闭主机通信；退出不会自动失能 |
 
 
-第一版不采用“一次性 enable 后程序立即退出且无人维护该电机”的常规调试模式。运动会话保持通信、跟踪目标有效期，关闭时执行停止流程。若提供单次管理命令，应明确其状态前置条件和退出后设备状态。
+工具不会切换模式、清错、保存参数或自动失能。使能后持续发送最新目标；发送或反馈故障会停止周期发送并等待用户显式执行 `disable`。`quit`、Ctrl-C 和 EOF 只撤销主机发送许可并关闭 SocketCAN，电机后续行为取决于其 TIMEOUT 和固件状态。
 
-以下仅是拟议交互，不是当前可执行命令：
+当前交互方式：
 
 ```text
-damiao_motor_tool config validate --file motors.yaml
-damiao_motor_tool inspect --file motors.yaml
-damiao_motor_tool session --file motors.yaml
-
-session> select motor_1
-session> inspect
-session> prepare-motion
-session> enable
-session> move-relative <受限角度> --speed <已验证速度> --duration <期限>
-session> stop
-session> disable
-session> exit
+damiao_motor_tool --file motor.yaml
+damiao[MAINTENANCE]> status
+damiao[MAINTENANCE]> enable
+damiao[CONTROL]> drive <输出轴绝对位置 rad> <最大绝对速度 rad/s>
+damiao[CONTROL]> disable
+damiao[MAINTENANCE]> quit
 ```
 
-软件应显示目标电机、模式、当前状态和限制；运动默认只针对明确选中的电机，不能自动广播到所有在线设备。每个动作记录开始/完成时间、结果和失败原因。
+当前工具只注册 YAML 中的一台电机，不存在广播操作。配置必须提供 CAN 接口、ESC_ID、MST_ID、输出轴位置上下限和最大速度；示例限位为空，必须由台架核对后填写。
 
 ### 12.2 调试会话与限制
 
-- 首版位置速度测试使用有限幅度、有限速度和有限会话期限，目标从实际位置开始。
+以下是完整调试会话的后续要求，当前最小工具只实现 12.1 节行为，尚无目标有效期、
+`prepare-motion`、多轴操作或配置回写：
+
+- 完整位置速度测试应使用有限幅度、有限速度和有限会话期限，目标从实际位置开始。
 - `prepare-motion` 检查参数、反馈、限制和停止策略，不隐式修改电机零点。
 - 多轴运动发送前检查完整目标集，记录实际逐帧发送情况；不宣传严格同时到达。
 - 单电机调试时，未选择轴是否失能或保持，由会话配置明确规定，禁止静默改变。
@@ -735,7 +729,8 @@ GUI 框架后续按项目需求选定；若使用 Python 界面，可为核心�
 
 ### 13.1 新增模块
 
-以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`，是待创建结构：
+以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`；`damiao_core` 和最小
+`damiao_tools` 已创建，`damiao_hardware`、`zayv2_bringup` 及完整工具接口仍是待建结构：
 
 ```text
 src/
@@ -751,9 +746,9 @@ src/
 │   └── test/
 ├── damiao_tools/
 │   ├── CMakeLists.txt
-│   ├── include/damiao_tools/debug_session.hpp
+│   ├── package.xml
 │   ├── src/
-│   ├── config/
+│   ├── config/motor.example.yaml
 │   └── test/
 ├── damiao_hardware/
 │   ├── CMakeLists.txt
@@ -769,7 +764,7 @@ src/
     └── launch/
 ```
 
-`damiao_tools` 保持独立 CMake 构建能力，调试会话可单独形成库供 GUI 使用。机器人真实 description/MoveIt 配置可在核对实体模型后迁移到明确的 ZayV2 包名，避免以 Aubo 名称暗示已经完成模型替换。
+`damiao_tools` 保持独立 CMake 构建能力；当前会话支持代码仅为包内静态目标，不安装公共头文件。后续 GUI 若需要复用，应先把完整调试会话整理为明确的公共接口。机器人真实 description/MoveIt 配置可在核对实体模型后迁移到明确的 ZayV2 包名，避免以 Aubo 名称暗示已经完成模型替换。
 
 代码遵循项目约定：4 空格缩进，C++ 大括号换行，关键代码块添加简明注释。新增接口需注明单位、坐标系、有效性、线程约束和失败行为。复用第三方代码时保留许可证与来源，记录参考提交版本。
 
