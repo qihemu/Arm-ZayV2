@@ -2,7 +2,7 @@
 <package format="3">
     <name>damiao_core</name>
     <version>0.1.0</version>
-    <description>ROS-independent Damiao protocol and SocketCAN library skeleton.</description>
+    <description>ROS-independent Damiao protocol, SocketCAN and multi-motor bus library.</description>
     <maintainer email="2389954298@qq.com">wlzc</maintainer>
     <license>TODO: License declaration</license>
 

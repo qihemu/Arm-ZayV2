@@ -22,7 +22,7 @@ enum class ControlMode : std::uint32_t
     PositionCurrentLimit = 4
 };
 
-// 地址为标准 11-bit ID；后续协议实现将限制 ESC_ID 为 1～15。
+// 地址为标准 11-bit ID；首版限制 ESC_ID 为 1～15。
 struct MotorAddress
 {
     std::uint16_t esc_id = 0;
@@ -84,10 +84,13 @@ enum class ErrorCode
     OwnershipConflict,
     AmbiguousReply,
     PartialFailure,
-    Unsupported
+    Unsupported,
+    InvalidFrame,
+    WouldBlock,
+    NotExecuted
 };
 
-// 文本仅供低频诊断；本骨架不承诺无分配或硬实时行为。
+// 文本仅供低频诊断；周期批量发送仅记录错误码，不构造诊断文本。
 struct Status
 {
     ErrorCode code = ErrorCode::Ok;
@@ -102,7 +105,7 @@ struct Result
     std::optional<T> value;
 };
 
-// 寄存器类型以后续新版手册表为准，不通过数值大小猜测。
+// 寄存器类型由新版手册表决定，不通过数值大小猜测。
 using RegisterValue = std::variant<float, std::uint32_t>;
 
 }  // namespace damiao
