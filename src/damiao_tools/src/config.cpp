@@ -1,14 +1,10 @@
 #include "config.hpp"
 
-#include <damiao_core/protocol.hpp>
-
 #include <yaml-cpp/yaml.h>
 
 #include <array>
 #include <cmath>
-#include <cstdint>
 #include <exception>
-#include <limits>
 #include <string>
 
 namespace damiao_tools
@@ -16,18 +12,29 @@ namespace damiao_tools
 namespace
 {
 
-constexpr std::array<const char*, 6> allowed_keys{
+constexpr std::array<const char*, 4> required_keys{
     "can_interface",
-    "esc_id",
-    "mst_id",
     "min_output_position_rad",
     "max_output_position_rad",
     "max_output_speed_rad_s"
 };
 
+constexpr std::array<const char*, 3> optional_keys{
+    "scan_esc_min",
+    "scan_esc_max",
+    "scan_timeout_ms"
+};
+
 bool known_key(const std::string& key)
 {
-    for (const auto* allowed : allowed_keys)
+    for (const auto* allowed : required_keys)
+    {
+        if (key == allowed)
+        {
+            return true;
+        }
+    }
+    for (const auto* allowed : optional_keys)
     {
         if (key == allowed)
         {
@@ -60,7 +67,7 @@ ConfigResult load_config(const std::string& path)
                 return failure("Configuration contains an unknown field.");
             }
         }
-        for (const auto* key : allowed_keys)
+        for (const auto* key : required_keys)
         {
             if (!root[key] || root[key].IsNull())
             {
@@ -70,28 +77,34 @@ ConfigResult load_config(const std::string& path)
 
         ToolConfig config;
         config.can_interface = root["can_interface"].as<std::string>();
-        const auto esc = root["esc_id"].as<std::uint32_t>();
-        const auto mst = root["mst_id"].as<std::uint32_t>();
-        if (esc > std::numeric_limits<std::uint16_t>::max()
-            || mst > std::numeric_limits<std::uint16_t>::max())
-        {
-            return failure("Motor address does not fit the supported ID type.");
-        }
-        config.esc_id = static_cast<std::uint16_t>(esc);
-        config.mst_id = static_cast<std::uint16_t>(mst);
         config.min_output_position_rad = root["min_output_position_rad"].as<double>();
         config.max_output_position_rad = root["max_output_position_rad"].as<double>();
         config.max_output_speed_rad_s = root["max_output_speed_rad_s"].as<double>();
 
-        const damiao::MotorAddress address{config.esc_id, config.mst_id};
+        if (root["scan_esc_min"])
+        {
+            config.scan_esc_min = root["scan_esc_min"].as<std::uint16_t>();
+        }
+        if (root["scan_esc_max"])
+        {
+            config.scan_esc_max = root["scan_esc_max"].as<std::uint16_t>();
+        }
+        if (root["scan_timeout_ms"])
+        {
+            config.scan_timeout_ms = root["scan_timeout_ms"].as<std::uint32_t>();
+        }
+
         if (config.can_interface.empty())
         {
             return failure("can_interface must not be empty.");
         }
-        const auto address_status = damiao::DamiaoProtocol::validate_address(address);
-        if (address_status.code != damiao::ErrorCode::Ok)
+        if (config.scan_esc_min < 1 || config.scan_esc_max > 15 || config.scan_esc_min > config.scan_esc_max)
         {
-            return {address_status, {}};
+            return failure("scan_esc_min/max must be within 1..15 and ordered.");
+        }
+        if (config.scan_timeout_ms <= 0)
+        {
+            return failure("scan_timeout_ms must be positive.");
         }
         if (!std::isfinite(config.min_output_position_rad)
             || !std::isfinite(config.max_output_position_rad)

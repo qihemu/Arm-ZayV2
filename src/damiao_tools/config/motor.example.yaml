@@ -1,7 +1,8 @@
-# 单电机链路测试配置。以下限位是占位符，核对台架后再填写，不能直接用于真机运动。
+# 单 CAN 总线多电机工具配置。运动限位为占位符，核对台架后再填写。
 can_interface: can0
-esc_id: 1
-mst_id: 17
-min_output_position_rad: null
-max_output_position_rad: null
-max_output_speed_rad_s: null
+min_output_position_rad: -12.5
+max_output_position_rad: 12.5
+max_output_speed_rad_s: 3
+scan_esc_min: 1
+scan_esc_max: 15
+scan_timeout_ms: 200

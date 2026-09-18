@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hpp"
+#include "motor_scanner.hpp"
 
 #include <damiao_core/bus.hpp>
 
@@ -9,32 +10,35 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace damiao_tools
 {
 
-// 最小单电机会话：后台只重复发送最新目标，不执行插值、自动失能或故障恢复。
-class MotorTestSession
+// 单 CAN 总线上多台可操作电机的注册、全使能与批量控制会话。
+class MotorBusSession
 {
 public:
-    explicit MotorTestSession(const ToolConfig& config,
+    MotorBusSession(const ToolConfig& config, const std::vector<DiscoveredMotor>& motors,
         std::unique_ptr<damiao::ICanTransport> transport = std::make_unique<damiao::SocketCanTransport>());
-    ~MotorTestSession();
-    MotorTestSession(const MotorTestSession&) = delete;
-    MotorTestSession& operator=(const MotorTestSession&) = delete;
+    ~MotorBusSession();
+    MotorBusSession(const MotorBusSession&) = delete;
+    MotorBusSession& operator=(const MotorBusSession&) = delete;
 
     damiao::Status initialize();
-    damiao::Result<damiao::MotorState> status();
-    damiao::Status enable();
-    damiao::Status drive(double absolute_position_rad, double speed_rad_s);
-    damiao::Status disable();
-    // 停止主机发送并关闭总线，刻意不向电机发送失能命令。
+    damiao::Result<damiao::MotorState> status(damiao::MotorIndex index);
+    damiao::Status enable_all();
+    damiao::Status disable_all();
+    damiao::Status drive(damiao::MotorIndex index, double absolute_position_rad, double speed_rad_s);
+    damiao::Status clear_error(damiao::MotorIndex index);
     damiao::Status shutdown();
 
-    bool motor_enabled() const noexcept;
+    std::size_t motor_count() const noexcept;
+    bool all_enabled() const noexcept;
     bool control_active() const noexcept;
     damiao::ErrorCode background_error() const noexcept;
     damiao::BusState bus_state() const;
+    const DiscoveredMotor& motor_info(damiao::MotorIndex index) const;
 
 private:
     void control_loop();
@@ -42,12 +46,12 @@ private:
     damiao::Deadline operation_deadline() const;
 
     ToolConfig config_;
+    std::vector<DiscoveredMotor> motors_;
     damiao::DamiaoBus bus_;
-    damiao::MotorIndex motor_index_ = 0;
+    std::vector<damiao::PositionVelocityCommand> commands_;
     mutable std::mutex command_mutex_;
-    damiao::PositionVelocityCommand command_;
     std::atomic<bool> initialized_{false};
-    std::atomic<bool> motor_enabled_{false};
+    std::atomic<bool> all_enabled_{false};
     std::atomic<bool> control_active_{false};
     std::atomic<bool> stop_requested_{true};
     std::atomic<damiao::ErrorCode> background_error_{damiao::ErrorCode::Ok};
