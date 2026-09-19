@@ -13,7 +13,7 @@
 namespace damiao_tools
 {
 
-// 扫描阶段发现的电机信息，含是否可参与注册与驱动。
+// 扫描阶段发现的电机信息；operable=已注册，drivable=可位置速度驱动。
 struct DiscoveredMotor
 {
     std::uint16_t esc_id = 0;
@@ -26,6 +26,7 @@ struct DiscoveredMotor
     std::uint8_t raw_status = 0;
     double output_position_rad = 0.0;
     bool operable = false;
+    bool drivable = false;
     std::string inoperable_reason;
 };
 

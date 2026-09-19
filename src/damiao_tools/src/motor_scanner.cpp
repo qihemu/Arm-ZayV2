@@ -187,7 +187,7 @@ ScanResult scan_motors(const ToolConfig& config, std::unique_ptr<damiao::ICanTra
     }
 
     auto last_receive = damiao::SteadyClock::now();
-    std::size_t operable_count = 0;
+    std::size_t registered_count = 0;
 
     for (std::uint16_t esc = config.scan_esc_min; esc <= config.scan_esc_max; ++esc)
     {
@@ -273,18 +273,25 @@ ScanResult scan_motors(const ToolConfig& config, std::unique_ptr<damiao::ICanTra
 
         if (motor.mode != damiao::ControlMode::PositionVelocity)
         {
-            motor.operable = false;
+            motor.drivable = false;
             motor.inoperable_reason = "非位置速度模式";
         }
-        else if (operable_count >= damiao::max_motors)
+        else
+        {
+            motor.drivable = true;
+        }
+        if (registered_count >= damiao::max_motors)
         {
             motor.operable = false;
-            motor.inoperable_reason = "超过单总线注册上限";
+            if (motor.inoperable_reason.empty())
+            {
+                motor.inoperable_reason = "超过单总线注册上限";
+            }
         }
         else
         {
             motor.operable = true;
-            ++operable_count;
+            ++registered_count;
         }
         result.motors.push_back(motor);
     }

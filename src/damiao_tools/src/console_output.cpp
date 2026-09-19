@@ -85,7 +85,7 @@ void print_motor_state(const damiao::Result<damiao::MotorState>& result)
 void print_motor_list(const std::vector<DiscoveredMotor>& motors, const std::string& can_interface,
     std::size_t registered_count, std::size_t selected_list_index)
 {
-    std::cout << "[" << can_interface << "] 已注册 " << registered_count << "/" << motors.size() << " 台\n";
+    std::cout << "\n[" << can_interface << "] 已注册 " << registered_count << "/" << motors.size() << " 台\n";
     for (std::size_t index = 0; index < motors.size(); ++index)
     {
         const auto& motor = motors[index];
@@ -102,7 +102,16 @@ void print_motor_list(const std::vector<DiscoveredMotor>& motors, const std::str
             << ", status=" << (motor.raw_status == 1 ? "使能" : "失能");
         if (!motor.operable)
         {
-            std::cout << " [不可操作";
+            std::cout << " [未注册";
+            if (!motor.inoperable_reason.empty())
+            {
+                std::cout << ": " << motor.inoperable_reason;
+            }
+            std::cout << "]";
+        }
+        else if (!motor.drivable)
+        {
+            std::cout << " [不可驱动";
             if (!motor.inoperable_reason.empty())
             {
                 std::cout << ": " << motor.inoperable_reason;

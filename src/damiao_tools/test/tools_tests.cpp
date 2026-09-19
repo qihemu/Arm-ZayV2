@@ -252,6 +252,12 @@ public:
         return disable_count_;
     }
 
+    std::size_t save_count() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return save_count_;
+    }
+
 private:
     void handle_management_transaction(const CanFrame& request)
     {
@@ -307,6 +313,21 @@ private:
                 response.data[4 + byte] = static_cast<std::uint8_t>(bits >> (8 * byte));
             }
         }
+        else if (operation == 0x55 && rid == 0x0A)
+        {
+            bits = std::uint32_t(request.data[4]) | (std::uint32_t(request.data[5]) << 8)
+                | (std::uint32_t(request.data[6]) << 16) | (std::uint32_t(request.data[7]) << 24);
+            motor->mode = bits;
+            for (unsigned int byte = 0; byte < 4; ++byte)
+            {
+                response.data[4 + byte] = static_cast<std::uint8_t>(bits >> (8 * byte));
+            }
+        }
+        else if (operation == 0xAA)
+        {
+            response.length = 4;
+            ++save_count_;
+        }
         response.received_at = SteadyClock::now();
         queue_.push_back(response);
     }
@@ -323,6 +344,7 @@ private:
     bool drop_control_feedback_ = false;
     std::size_t enable_count_ = 0;
     std::size_t disable_count_ = 0;
+    std::size_t save_count_ = 0;
 };
 
 ToolConfig tool_config()
@@ -369,7 +391,8 @@ void test_scanner_finds_multiple_motors()
     check(result.status.code == ErrorCode::Ok, "scanner succeeds");
     check(result.motors.size() == 2, "scanner finds two motors");
     check(result.motors[0].esc_id == 1 && result.motors[1].esc_id == 2, "scanner esc ids");
-    check(result.motors[0].operable && result.motors[1].operable, "scanner marks operable");
+    check(result.motors[0].operable && result.motors[1].operable, "scanner marks registered");
+    check(result.motors[0].drivable && result.motors[1].drivable, "scanner marks pv drivable");
 }
 
 void test_bus_session_requires_enable_all_before_drive()
@@ -384,6 +407,7 @@ void test_bus_session_requires_enable_all_before_drive()
     discovered.tmax_nm = 10.0;
     discovered.firmware_version = 72;
     discovered.operable = true;
+    discovered.drivable = true;
 
     auto transport = std::make_unique<FakeTransport>(motors);
     auto* fake = transport.get();
@@ -391,6 +415,7 @@ void test_bus_session_requires_enable_all_before_drive()
     check(session.initialize().code == ErrorCode::Ok, "session initializes");
     check(session.drive(0, 0.5, 0.2).code == ErrorCode::InvalidCommand, "drive before enable rejected");
     check(session.enable_all().code == ErrorCode::Ok && fake->enable_count() == 1, "enable all");
+    check(session.motor_info(0).raw_status == 1, "enable updates displayed status");
     check(session.drive(0, 0.5, 0.2).code == ErrorCode::Ok, "drive after enable accepted");
     eventually([&]
     {
@@ -398,6 +423,7 @@ void test_bus_session_requires_enable_all_before_drive()
     }, "drive target reaches transport");
     check(session.disable_all().code == ErrorCode::Ok && fake->disable_count() == 1,
         "disable all");
+    check(session.motor_info(0).raw_status == 0, "disable updates displayed status");
     session.shutdown();
 }
 
@@ -419,6 +445,7 @@ void test_bus_session_holds_other_axes()
         motor.tmax_nm = sim.tmax;
         motor.firmware_version = sim.firmware;
         motor.operable = true;
+        motor.drivable = true;
         discovered.push_back(motor);
     }
 
@@ -438,6 +465,116 @@ void test_bus_session_holds_other_axes()
     session.shutdown();
 }
 
+void test_set_control_mode_requires_disable()
+{
+    std::vector<MotorSim> motors{{1, 0x11, 0, 2, 12.5F, 30.0F, 10.0F, 72}};
+    DiscoveredMotor discovered;
+    discovered.esc_id = 1;
+    discovered.mst_id = 0x11;
+    discovered.mode = ControlMode::PositionVelocity;
+    discovered.pmax_rad = 12.5;
+    discovered.vmax_rad_s = 30.0;
+    discovered.tmax_nm = 10.0;
+    discovered.firmware_version = 72;
+    discovered.operable = true;
+    discovered.drivable = true;
+
+    MotorBusSession session(tool_config(), {discovered},
+        std::make_unique<FakeTransport>(motors));
+    check(session.initialize().code == ErrorCode::Ok, "mode session initializes");
+    check(session.enable_all().code == ErrorCode::Ok, "mode session enables");
+    check(session.set_control_mode(0, ControlMode::Mit).code == ErrorCode::InvalidCommand,
+        "mode change rejected while enabled");
+    check(session.disable_all().code == ErrorCode::Ok, "mode session disables");
+    session.shutdown();
+}
+
+void test_set_control_mode_updates_metadata()
+{
+    std::vector<MotorSim> motors{{1, 0x11, 0, 2, 12.5F, 30.0F, 10.0F, 72}};
+    DiscoveredMotor discovered;
+    discovered.esc_id = 1;
+    discovered.mst_id = 0x11;
+    discovered.mode = ControlMode::PositionVelocity;
+    discovered.pmax_rad = 12.5;
+    discovered.vmax_rad_s = 30.0;
+    discovered.tmax_nm = 10.0;
+    discovered.firmware_version = 72;
+    discovered.operable = true;
+    discovered.drivable = true;
+
+    MotorBusSession session(tool_config(), {discovered},
+        std::make_unique<FakeTransport>(motors));
+    check(session.initialize().code == ErrorCode::Ok, "mode metadata session initializes");
+    check(session.set_control_mode(0, ControlMode::Mit).code == ErrorCode::Ok, "switch to MIT");
+    const auto mit_mode = session.read_control_mode(0);
+    check(mit_mode.value == ControlMode::Mit, "MIT mode readback");
+    check(session.motor_info(0).mode == ControlMode::Mit, "session metadata updated");
+    check(!session.motor_info(0).drivable, "MIT mode not drivable");
+    check(session.enable_all().code == ErrorCode::InvalidCommand,
+        "enable rejected for non position-velocity mode");
+    check(session.set_control_mode(0, ControlMode::PositionVelocity).code == ErrorCode::Ok,
+        "restore position-velocity mode");
+    check(session.motor_info(0).mode == ControlMode::PositionVelocity, "PV mode restored");
+    check(session.motor_info(0).drivable, "PV mode drivable again");
+    check(session.enable_all().code == ErrorCode::Ok, "enable succeeds after PV restore");
+    check(session.disable_all().code == ErrorCode::Ok, "mode metadata session disables");
+    session.shutdown();
+}
+
+void test_non_pv_motor_registers_without_drive()
+{
+    std::vector<MotorSim> motors{{2, 0x12, 0, 1, 12.5F, 30.0F, 10.0F, 72}};
+    DiscoveredMotor discovered;
+    discovered.esc_id = 2;
+    discovered.mst_id = 0x12;
+    discovered.mode = ControlMode::Mit;
+    discovered.pmax_rad = 12.5;
+    discovered.vmax_rad_s = 30.0;
+    discovered.tmax_nm = 10.0;
+    discovered.firmware_version = 72;
+    discovered.operable = true;
+    discovered.drivable = false;
+    discovered.inoperable_reason = "非位置速度模式";
+
+    MotorBusSession session(tool_config(), {discovered},
+        std::make_unique<FakeTransport>(motors));
+    check(session.initialize().code == ErrorCode::Ok, "MIT motor registers");
+    check(session.enable_all().code == ErrorCode::InvalidCommand, "MIT motor cannot enable all");
+    check(session.drive(0, 0.1, 0.1).code == ErrorCode::InvalidCommand, "MIT motor cannot drive");
+    session.shutdown();
+}
+
+void test_save_parameters_requires_disable()
+{
+    std::vector<MotorSim> motors{{1, 0x11, 0, 2, 12.5F, 30.0F, 10.0F, 72}};
+    DiscoveredMotor discovered;
+    discovered.esc_id = 1;
+    discovered.mst_id = 0x11;
+    discovered.mode = ControlMode::PositionVelocity;
+    discovered.pmax_rad = 12.5;
+    discovered.vmax_rad_s = 30.0;
+    discovered.tmax_nm = 10.0;
+    discovered.firmware_version = 72;
+    discovered.operable = true;
+    discovered.drivable = true;
+
+    auto transport = std::make_unique<FakeTransport>(motors);
+    auto* fake = transport.get();
+    MotorBusSession session(tool_config(), {discovered}, std::move(transport));
+    check(session.initialize().code == ErrorCode::Ok, "save session initializes");
+    check(session.save_parameters(0).code == ErrorCode::Ok, "save after init with fresh query");
+    check(session.bus_state() == BusState::Maintenance, "save keeps maintenance state");
+    check(fake->save_count() == 1, "flash save after init");
+    check(session.enable_all().code == ErrorCode::Ok, "save session enables");
+    check(session.save_parameters(0).code == ErrorCode::InvalidCommand,
+        "save rejected while enabled");
+    check(session.disable_all().code == ErrorCode::Ok, "save session disables");
+    check(session.save_parameters(0).code == ErrorCode::Ok, "save parameters succeeds");
+    check(fake->save_count() == 2, "flash save after disable");
+    session.shutdown();
+}
+
 }  // namespace
 
 int main()
@@ -448,6 +585,10 @@ int main()
         test_scanner_finds_multiple_motors();
         test_bus_session_requires_enable_all_before_drive();
         test_bus_session_holds_other_axes();
+        test_set_control_mode_requires_disable();
+        test_set_control_mode_updates_metadata();
+        test_non_pv_motor_registers_without_drive();
+        test_save_parameters_requires_disable();
         std::cout << "damiao_tools software tests passed\n";
         return 0;
     }

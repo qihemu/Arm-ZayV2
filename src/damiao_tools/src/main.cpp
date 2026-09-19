@@ -62,8 +62,27 @@ bool parse_index(const std::string& text, std::size_t& value)
     }
 }
 
-void print_menu(const damiao_tools::MotorManager& manager)
+bool parse_control_mode(const std::string& text, damiao::ControlMode& mode)
 {
+    std::size_t code = 0;
+    if (!parse_index(text, code) || code > 4)
+    {
+        return false;
+    }
+    mode = static_cast<damiao::ControlMode>(code);
+    return true;
+}
+
+void print_context(damiao_tools::MotorManager& manager)
+{
+    manager.refresh_motor_display();
+    damiao_tools::print_motor_list(manager.motors(), manager.config().can_interface,
+        manager.registered_count(), manager.selected_list_index());
+}
+
+void print_menu(damiao_tools::MotorManager& manager)
+{
+    print_context(manager);
     const auto enabled = manager.all_enabled();
     const auto registered = manager.registered_count();
     std::cout
@@ -72,20 +91,15 @@ void print_menu(const damiao_tools::MotorManager& manager)
         << " | 已使能 " << (enabled ? registered : 0) << "/" << registered
         << " | 总线 " << damiao_tools::bus_state_name(manager.bus_state()) << "\n"
         << "1. 选择电机\n"
-        << "2. 查询当前选中电机状态\n"
-        << "3. 查询全部电机状态\n"
-        << "4. 使能全部电机\n"
-        << "5. 失能全部电机\n"
-        << "6. 驱动选中电机到目标角度\n"
-        << "7. 清错（当前选中电机）\n"
-        << "8. 重新扫描总线\n"
+        << "2. 查询全部电机状态\n"
+        << "3. 使能全部电机\n"
+        << "4. 失能全部电机\n"
+        << "5. 驱动选中电机到目标角度\n"
+        << "6. 清错（当前选中电机）\n"
+        << "7. 重新扫描总线\n"
+        << "8. 修改选中电机控制模式（须已失能）\n"
+        << "9. 保存参数到 Flash（须已失能）\n"
         << "0. 退出\n";
-}
-
-void print_context(const damiao_tools::MotorManager& manager)
-{
-    damiao_tools::print_motor_list(manager.motors(), manager.config().can_interface,
-        manager.registered_count(), manager.selected_list_index());
 }
 
 }  // namespace
@@ -118,10 +132,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    print_context(manager);
-    if (manager.operable_count() == 0)
+    if (manager.registered_count() == 0)
     {
-        std::cerr << "未找到可操作电机，请检查 CAN 接线与接口配置。\n";
+        print_context(manager);
+        std::cerr << "未找到可注册电机，请检查 CAN 接线与接口配置。\n";
         manager.shutdown();
         return 1;
     }
@@ -187,11 +201,6 @@ int main(int argc, char** argv)
         }
         if (choice == 2)
         {
-            damiao_tools::print_motor_state(manager.status_selected());
-            continue;
-        }
-        if (choice == 3)
-        {
             const auto states = manager.status_all();
             for (std::size_t index = 0; index < states.size(); ++index)
             {
@@ -200,7 +209,7 @@ int main(int argc, char** argv)
             }
             continue;
         }
-        if (choice == 4)
+        if (choice == 3)
         {
             const auto result = manager.enable_all();
             if (result.code == damiao::ErrorCode::Ok)
@@ -214,7 +223,7 @@ int main(int argc, char** argv)
             }
             continue;
         }
-        if (choice == 5)
+        if (choice == 4)
         {
             const auto result = manager.disable_all();
             if (result.code == damiao::ErrorCode::Ok)
@@ -227,11 +236,16 @@ int main(int argc, char** argv)
             }
             continue;
         }
-        if (choice == 6)
+        if (choice == 5)
         {
             if (!manager.all_enabled())
             {
-                std::cerr << "请先执行菜单 4 使能全部电机。\n";
+                std::cerr << "请先执行菜单 3 使能全部电机。\n";
+                continue;
+            }
+            if (!manager.motors()[manager.selected_list_index()].drivable)
+            {
+                std::cerr << "当前选中电机非位置速度模式，无法驱动。\n";
                 continue;
             }
             std::cout << "输入目标位置(rad)> " << std::flush;
@@ -269,7 +283,7 @@ int main(int argc, char** argv)
             }
             continue;
         }
-        if (choice == 7)
+        if (choice == 6)
         {
             const auto result = manager.clear_error_selected();
             if (result.code == damiao::ErrorCode::Ok)
@@ -282,13 +296,75 @@ int main(int argc, char** argv)
             }
             continue;
         }
-        if (choice == 8)
+        if (choice == 7)
         {
             const auto result = manager.rescan(loaded.config);
             if (result.code == damiao::ErrorCode::Ok)
             {
-                print_context(manager);
                 std::cout << "重新扫描完成。\n";
+            }
+            else
+            {
+                damiao_tools::print_status_error(result);
+            }
+            continue;
+        }
+        if (choice == 8)
+        {
+            if (manager.all_enabled() || manager.control_active())
+            {
+                std::cerr << "请先执行菜单 4 失能全部电机。\n";
+                continue;
+            }
+            const auto current_mode = manager.read_control_mode_selected();
+            if (!current_mode.value)
+            {
+                damiao_tools::print_status_error(current_mode.status);
+                continue;
+            }
+            std::cout << "当前模式: "
+                << damiao_tools::control_mode_name(*current_mode.value) << '\n'
+                << "1=MIT 2=PositionVelocity 3=Velocity 4=PositionCurrentLimit\n"
+                << "输入模式编号> " << std::flush;
+            if (!std::getline(std::cin, line))
+            {
+                break;
+            }
+            damiao::ControlMode target_mode = damiao::ControlMode::PositionVelocity;
+            if (!parse_control_mode(line, target_mode))
+            {
+                std::cerr << "请输入 1 到 4 之间的模式编号。\n";
+                continue;
+            }
+            const auto result = manager.set_control_mode_selected(target_mode);
+            if (result.code == damiao::ErrorCode::Ok)
+            {
+                std::cout << "M" << (manager.selected_list_index() + 1)
+                    << " 控制模式已更新为 "
+                    << damiao_tools::control_mode_name(target_mode) << "。\n";
+                if (target_mode != damiao::ControlMode::PositionVelocity)
+                {
+                    std::cout << "非位置速度模式不可使能或驱动；未写入 Flash，可用菜单 9 保存。\n";
+                }
+            }
+            else
+            {
+                damiao_tools::print_status_error(result);
+            }
+            continue;
+        }
+        if (choice == 9)
+        {
+            if (manager.all_enabled() || manager.control_active())
+            {
+                std::cerr << "请先执行菜单 4 失能全部电机。\n";
+                continue;
+            }
+            const auto result = manager.save_parameters_selected();
+            if (result.code == damiao::ErrorCode::Ok)
+            {
+                std::cout << "M" << (manager.selected_list_index() + 1)
+                    << " 参数已保存到 Flash。\n";
             }
             else
             {

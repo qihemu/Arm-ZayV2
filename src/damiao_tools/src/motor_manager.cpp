@@ -10,6 +10,21 @@ damiao::Status invalid_manager(const char* message)
     return {damiao::ErrorCode::InvalidCommand, message};
 }
 
+// 同步列表中的模式与可驱动标记；已注册轴保持 operable 不变。
+void sync_discovered_mode(DiscoveredMotor& motor, damiao::ControlMode mode)
+{
+    motor.mode = mode;
+    motor.drivable = mode == damiao::ControlMode::PositionVelocity;
+    if (motor.drivable)
+    {
+        motor.inoperable_reason.clear();
+    }
+    else
+    {
+        motor.inoperable_reason = "非位置速度模式";
+    }
+}
+
 void build_session_mapping(const std::vector<DiscoveredMotor>& motors,
     std::vector<std::optional<damiao::MotorIndex>>& mapping)
 {
@@ -58,7 +73,7 @@ damiao::Status MotorManager::rebuild_session(std::unique_ptr<damiao::ICanTranspo
     const auto operable = collect_operable(motors_);
     if (operable.empty())
     {
-        return invalid_manager("No operable motors found on the bus.");
+        return invalid_manager("No registered motors found on the bus.");
     }
     session_ = std::make_unique<MotorBusSession>(config_, operable, std::move(transport));
     return session_->initialize();
@@ -168,24 +183,38 @@ damiao::Status MotorManager::select_motor(std::size_t list_index_one_based)
     const std::size_t list_index = list_index_one_based - 1;
     if (!motors_[list_index].operable)
     {
-        return invalid_manager("Selected motor is not operable.");
+        return invalid_manager("Selected motor is not registered.");
     }
     selected_list_index_ = list_index;
     return {};
 }
 
-damiao::Result<damiao::MotorState> MotorManager::status_selected()
+void MotorManager::sync_discovered_from_session()
 {
     if (!session_)
     {
-        return {{damiao::ErrorCode::Disconnected, "Session is not initialized."}, std::nullopt};
+        return;
     }
-    const auto session_index = session_index_for_list(selected_list_index_);
-    if (!session_index)
+    for (std::size_t list_index = 0; list_index < motors_.size(); ++list_index)
     {
-        return {{damiao::ErrorCode::InvalidCommand, "Selected motor is not registered."}, std::nullopt};
+        const auto session_index = session_index_for_list(list_index);
+        if (!session_index)
+        {
+            continue;
+        }
+        const auto& info = session_->motor_info(*session_index);
+        motors_[list_index].raw_status = info.raw_status;
+        motors_[list_index].output_position_rad = info.output_position_rad;
     }
-    return session_->status(*session_index);
+}
+
+void MotorManager::refresh_motor_display()
+{
+    if (session_)
+    {
+        session_->refresh_motor_cache();
+    }
+    sync_discovered_from_session();
 }
 
 std::vector<damiao::Result<damiao::MotorState>> MotorManager::status_all()
@@ -205,6 +234,7 @@ std::vector<damiao::Result<damiao::MotorState>> MotorManager::status_all()
         }
         results.push_back(session_->status(*session_index));
     }
+    sync_discovered_from_session();
     return results;
 }
 
@@ -214,7 +244,12 @@ damiao::Status MotorManager::enable_all()
     {
         return invalid_manager("Session is not initialized.");
     }
-    return session_->enable_all();
+    const auto result = session_->enable_all();
+    if (result.code == damiao::ErrorCode::Ok)
+    {
+        sync_discovered_from_session();
+    }
+    return result;
 }
 
 damiao::Status MotorManager::disable_all()
@@ -223,7 +258,12 @@ damiao::Status MotorManager::disable_all()
     {
         return invalid_manager("Session is not initialized.");
     }
-    return session_->disable_all();
+    const auto result = session_->disable_all();
+    if (result.code == damiao::ErrorCode::Ok)
+    {
+        sync_discovered_from_session();
+    }
+    return result;
 }
 
 damiao::Status MotorManager::drive_selected(double absolute_position_rad, double speed_rad_s)
@@ -236,6 +276,10 @@ damiao::Status MotorManager::drive_selected(double absolute_position_rad, double
     if (!session_index)
     {
         return invalid_manager("Selected motor is not registered.");
+    }
+    if (!motors_[selected_list_index_].drivable)
+    {
+        return invalid_manager("Selected motor is not in position-velocity mode.");
     }
     return session_->drive(*session_index, absolute_position_rad, speed_rad_s);
 }
@@ -252,6 +296,54 @@ damiao::Status MotorManager::clear_error_selected()
         return invalid_manager("Selected motor is not registered.");
     }
     return session_->clear_error(*session_index);
+}
+
+damiao::Result<damiao::ControlMode> MotorManager::read_control_mode_selected()
+{
+    if (!session_)
+    {
+        return {{damiao::ErrorCode::Disconnected, "Session is not initialized."}, std::nullopt};
+    }
+    const auto session_index = session_index_for_list(selected_list_index_);
+    if (!session_index)
+    {
+        return {{damiao::ErrorCode::InvalidCommand, "Selected motor is not registered."}, std::nullopt};
+    }
+    return session_->read_control_mode(*session_index);
+}
+
+damiao::Status MotorManager::set_control_mode_selected(damiao::ControlMode mode)
+{
+    if (!session_)
+    {
+        return invalid_manager("Session is not initialized.");
+    }
+    const auto session_index = session_index_for_list(selected_list_index_);
+    if (!session_index)
+    {
+        return invalid_manager("Selected motor is not registered.");
+    }
+    const auto result = session_->set_control_mode(*session_index, mode);
+    if (result.code != damiao::ErrorCode::Ok)
+    {
+        return result;
+    }
+    sync_discovered_mode(motors_[selected_list_index_], mode);
+    return {};
+}
+
+damiao::Status MotorManager::save_parameters_selected()
+{
+    if (!session_)
+    {
+        return invalid_manager("Session is not initialized.");
+    }
+    const auto session_index = session_index_for_list(selected_list_index_);
+    if (!session_index)
+    {
+        return invalid_manager("Selected motor is not registered.");
+    }
+    return session_->save_parameters(*session_index);
 }
 
 damiao::Status MotorManager::shutdown()
