@@ -545,6 +545,11 @@ void test_maintenance_and_control()
     check(fake->sent_count() == rejected_count, "unsupported migration no send");
     check(bus.save_parameters(0, SteadyClock::now() + 10ms).code == ErrorCode::InvalidCommand, "flash deadline budget");
     check(bus.save_parameters(0, deadline()).code == ErrorCode::Ok, "flash ack matched");
+    check(bus.snapshot(0).status.code == ErrorCode::StaleFeedback, "flash save invalidates cache");
+    check(bus.recover_maintenance().code == ErrorCode::Ok, "recover allowed in maintenance");
+    check(bus.state() == BusState::Maintenance, "bus stays in maintenance");
+    bus.query_state(0, deadline());
+    bus.query_state(1, deadline());
     const auto command_count = fake->sent_count();
     check(bus.enable(0, SteadyClock::now()).code == ErrorCode::Timeout && fake->sent_count() == command_count,
         "expired management command no send");
@@ -604,6 +609,71 @@ void test_maintenance_and_control()
         "explicit best-effort disable after partial failure");
     check(bus.state() == BusState::Fault, "disable does not auto-clear fault");
     check(bus.close().code == ErrorCode::Ok, "fault resource cleanup");
+}
+
+void test_typed_configuration_api()
+{
+    auto transport = std::make_unique<FakeTransport>();
+    auto* fake = transport.get();
+    DamiaoBus bus(std::move(transport));
+    bus.register_motor(motor_config(1));
+    bus.register_motor(motor_config(2));
+    check(bus.open(bus_config()).code == ErrorCode::Ok, "typed config bus open");
+    check(bus.synchronize_motor(0, deadline()).code == ErrorCode::Ok, "motor 1 synchronized");
+    check(bus.synchronize_motor(1, deadline()).code == ErrorCode::Ok, "motor 2 synchronized");
+    bus.query_state(0, deadline());
+    bus.query_state(1, deadline());
+
+    const auto timeout = bus.read_communication_timeout(0, deadline());
+    check(timeout.status.code == ErrorCode::Ok && timeout.value && timeout.value->count() == 100,
+        "timeout register converted to milliseconds");
+    const auto timeout_report = bus.write_communication_timeout(0, 125ms, deadline());
+    check(timeout_report.status.code == ErrorCode::Ok && timeout_report.verified
+        && timeout_report.readback == RegisterValue{std::uint32_t{2500}}, "timeout write uses 50us counts");
+    const auto timeout_readback = bus.read_communication_timeout(0, deadline());
+    check(timeout_readback.value && timeout_readback.value->count() == 125, "timeout readback matches written ms");
+
+    const auto mode_before = bus.read_control_mode(0, deadline());
+    check(mode_before.value == ControlMode::PositionVelocity, "initial mode readback");
+    bus.query_state(0, deadline());
+    bus.query_state(1, deadline());
+    check(bus.set_control_mode(0, ControlMode::Mit, deadline()).code == ErrorCode::Ok, "set MIT mode");
+    const auto mit_mode = bus.read_control_mode(0, deadline());
+    check(mit_mode.value == ControlMode::Mit, "MIT mode readback");
+    check(bus.query_state(0, deadline()).status.code == ErrorCode::Ok, "motor 0 fresh before MIT enable check");
+    check(bus.query_state(1, deadline()).status.code == ErrorCode::Ok, "motor 1 fresh before MIT enable check");
+    check(bus.enable(0, deadline()).code == ErrorCode::Unsupported, "MIT mode still cannot enable in v1");
+    check(bus.set_control_mode(0, ControlMode::PositionVelocity, deadline()).code == ErrorCode::Ok,
+        "restore position-velocity mode");
+
+    bus.query_state(0, deadline());
+    bus.query_state(1, deadline());
+    check(bus.snapshot(0).status.code == ErrorCode::Ok && bus.snapshot(1).status.code == ErrorCode::Ok,
+        "both motors fresh before mapping write");
+    const MappingLimits new_limits{8.0, 25.0, 9.0};
+    const auto mapping_report = bus.write_mapping_limits(0, new_limits, deadline());
+    check(mapping_report.status.code == ErrorCode::Ok, "mapping write status ok");
+    check(mapping_report.position.verified, "mapping position write verified");
+    check(mapping_report.velocity.verified, "mapping velocity write verified");
+    check(mapping_report.torque.verified, "mapping torque write verified");
+    check(mapping_report.verified, "mapping limits write evidence");
+    check(near(bus.motor_config(0).value->mapping.position_rad, 8.0)
+        && near(bus.motor_config(0).value->mapping.velocity_rad_s, 25.0)
+        && near(bus.motor_config(0).value->mapping.torque_nm, 9.0), "target motor mapping updated");
+    check(near(bus.motor_config(1).value->mapping.position_rad, 6.0), "peer motor mapping unchanged");
+    const auto mapping_readback = bus.read_mapping_limits(0, deadline());
+    check(mapping_readback.status.code == ErrorCode::Ok && mapping_readback.value
+        && near(mapping_readback.value->position_rad, 8.0)
+        && near(mapping_readback.value->velocity_rad_s, 25.0)
+        && near(mapping_readback.value->torque_nm, 9.0), "mapping limits readback");
+
+    bus.query_state(0, deadline());
+    const auto revision = bus.snapshot(0).value->mapping_revision;
+    check(bus.save_zero_position(0, deadline()).code == ErrorCode::Ok, "save_zero_position alias");
+    bus.query_state(0, deadline());
+    check(bus.snapshot(0).value->mapping_revision > revision, "zero alias invalidates coordinate revision");
+    check(fake->sent_count() > 0, "typed config operations exercised transport");
+    check(bus.close().code == ErrorCode::Ok, "typed config bus close");
 }
 
 void test_passive_routing()
@@ -818,6 +888,7 @@ int main()
         {"process ownership", test_ownership},
         {"motor registration", test_registration},
         {"maintenance and batch control", test_maintenance_and_control},
+        {"typed configuration API", test_typed_configuration_api},
         {"passive routing and stale feedback", test_passive_routing},
         {"transaction timeout and readback mismatch", test_transaction_faults},
         {"concurrent management deadlines", test_concurrent_management},

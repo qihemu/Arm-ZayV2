@@ -39,6 +39,30 @@ bool parameter_shaped(const CanFrame& frame, std::uint16_t esc)
         || ((frame.data[2] == 0x33 || frame.data[2] == 0x55) && register_info(frame.data[3]) != nullptr);
 }
 
+constexpr std::chrono::microseconds kTimeoutRegisterStep{50};
+
+// TIMEOUT 寄存器按 50μs/计数；毫秒换算为 uint32 计数。
+Result<std::uint32_t> timeout_counts_from_ms(std::chrono::milliseconds timeout)
+{
+    if (timeout.count() <= 0)
+    {
+        return failure<std::uint32_t>(ErrorCode::InvalidCommand, "Communication timeout must be positive.");
+    }
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(timeout);
+    const auto count_value = micros / kTimeoutRegisterStep;
+    if (count_value <= 0)
+    {
+        return failure<std::uint32_t>(ErrorCode::InvalidCommand, "Communication timeout is too small for register resolution.");
+    }
+    return {{}, static_cast<std::uint32_t>(count_value)};
+}
+
+// 将 TIMEOUT 计数换算为毫秒。
+std::chrono::milliseconds timeout_ms_from_counts(std::uint32_t counts)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(counts * kTimeoutRegisterStep);
+}
+
 }  // namespace
 
 DamiaoBus::DamiaoBus(std::unique_ptr<ICanTransport> transport) : transport_(std::move(transport))
@@ -377,6 +401,85 @@ Result<RegisterValue> DamiaoBus::read_parameter(MotorIndex index, std::uint8_t r
     return read_unlocked(index, rid, deadline);
 }
 
+Result<ControlMode> DamiaoBus::read_control_mode(MotorIndex index, Deadline deadline)
+{
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        return {{ErrorCode::WouldBlock, "Another management operation is active."}, std::nullopt};
+    }
+    const auto result = read_unlocked(index, RegisterId::CtrlMode, deadline);
+    if (result.status.code != ErrorCode::Ok || !result.value)
+    {
+        return {result.status, std::nullopt};
+    }
+    const auto* mode_code = std::get_if<std::uint32_t>(&*result.value);
+    if (mode_code == nullptr || *mode_code < 1 || *mode_code > 4)
+    {
+        return failure<ControlMode>(ErrorCode::InvalidConfiguration, "Control mode register value is out of range.");
+    }
+    return {{}, static_cast<ControlMode>(*mode_code)};
+}
+
+Result<MappingLimits> DamiaoBus::read_mapping_limits(MotorIndex index, Deadline deadline)
+{
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        return {{ErrorCode::WouldBlock, "Another management operation is active."}, std::nullopt};
+    }
+    const auto position = read_unlocked(index, RegisterId::Pmax, deadline);
+    if (position.status.code != ErrorCode::Ok || !position.value)
+    {
+        return {position.status, std::nullopt};
+    }
+    const auto velocity = read_unlocked(index, RegisterId::Vmax, deadline);
+    if (velocity.status.code != ErrorCode::Ok || !velocity.value)
+    {
+        return {velocity.status, std::nullopt};
+    }
+    const auto torque = read_unlocked(index, RegisterId::Tmax, deadline);
+    if (torque.status.code != ErrorCode::Ok || !torque.value)
+    {
+        return {torque.status, std::nullopt};
+    }
+    const auto* position_rad = std::get_if<float>(&*position.value);
+    const auto* velocity_rad_s = std::get_if<float>(&*velocity.value);
+    const auto* torque_nm = std::get_if<float>(&*torque.value);
+    if (position_rad == nullptr || velocity_rad_s == nullptr || torque_nm == nullptr)
+    {
+        return failure<MappingLimits>(ErrorCode::InvalidConfiguration, "Mapping registers require float values.");
+    }
+    MappingLimits limits{*position_rad, *velocity_rad_s, *torque_nm};
+    const auto validated = DamiaoProtocol::validate_mapping_limits(limits);
+    if (validated.code != ErrorCode::Ok)
+    {
+        return {validated, std::nullopt};
+    }
+    return {{}, limits};
+}
+
+Result<std::chrono::milliseconds> DamiaoBus::read_communication_timeout(MotorIndex index, Deadline deadline)
+{
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        return {{ErrorCode::WouldBlock, "Another management operation is active."}, std::nullopt};
+    }
+    const auto result = read_unlocked(index, RegisterId::Timeout, deadline);
+    if (result.status.code != ErrorCode::Ok || !result.value)
+    {
+        return {result.status, std::nullopt};
+    }
+    const auto* counts = std::get_if<std::uint32_t>(&*result.value);
+    if (counts == nullptr || *counts == 0)
+    {
+        return failure<std::chrono::milliseconds>(ErrorCode::InvalidConfiguration,
+            "Communication timeout register must be a positive integer.");
+    }
+    return {{}, timeout_ms_from_counts(*counts)};
+}
+
 void DamiaoBus::invalidate(MotorIndex index)
 {
     ++revisions_[index];
@@ -476,14 +579,17 @@ Result<MotorState> DamiaoBus::query_state(MotorIndex index, Deadline deadline)
 }
 
 ParameterWriteReport DamiaoBus::write_unlocked(MotorIndex index, std::uint8_t rid,
-    const RegisterValue& value, Deadline deadline)
+    const RegisterValue& value, Deadline deadline, bool verify_disabled)
 {
     ParameterWriteReport report;
     report.requested = value;
-    report.status = management_gate(index, true);
-    if (report.status.code != ErrorCode::Ok)
+    if (verify_disabled)
     {
-        return report;
+        report.status = management_gate(index, true);
+        if (report.status.code != ErrorCode::Ok)
+        {
+            return report;
+        }
     }
     // 在线地址与波特率变更需要固件确认后的迁移流程；本版拒绝，避免失联盲发。
     if (rid == 0x07 || rid == 0x08 || rid == 0x23)
@@ -591,7 +697,82 @@ Status DamiaoBus::switch_mode(MotorIndex index, ControlMode mode, Deadline deadl
     {
         return {ErrorCode::WouldBlock, "Another management operation is active."};
     }
-    return write_unlocked(index, 0x0A, std::uint32_t(mode), deadline).status;
+    return write_unlocked(index, RegisterId::CtrlMode, std::uint32_t(mode), deadline).status;
+}
+
+Status DamiaoBus::set_control_mode(MotorIndex index, ControlMode mode, Deadline deadline)
+{
+    return switch_mode(index, mode, deadline);
+}
+
+MappingLimitsWriteReport DamiaoBus::write_mapping_limits(MotorIndex index, const MappingLimits& limits,
+    Deadline deadline)
+{
+    MappingLimitsWriteReport report;
+    report.status = DamiaoProtocol::validate_mapping_limits(limits);
+    if (report.status.code != ErrorCode::Ok)
+    {
+        return report;
+    }
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        report.status = {ErrorCode::WouldBlock, "Another management operation is active."};
+        return report;
+    }
+    report.status = management_gate(index, true);
+    if (report.status.code != ErrorCode::Ok)
+    {
+        return report;
+    }
+    // 已通过失能确认后再撤销映射可信标记；逐寄存器写时会各自 invalidate。
+    {
+        std::lock_guard<std::mutex> cache(cache_mutex_);
+        motors_[index].mapping_confirmed = false;
+    }
+    const std::array<std::pair<std::uint8_t, float>, 3> fields{{
+        {RegisterId::Pmax, static_cast<float>(limits.position_rad)},
+        {RegisterId::Vmax, static_cast<float>(limits.velocity_rad_s)},
+        {RegisterId::Tmax, static_cast<float>(limits.torque_nm)},
+    }};
+    ParameterWriteReport* step_reports[] = {&report.position, &report.velocity, &report.torque};
+    for (std::size_t step = 0; step < fields.size(); ++step)
+    {
+        *step_reports[step] = write_unlocked(index, fields[step].first, fields[step].second, deadline, false);
+        if (step_reports[step]->status.code != ErrorCode::Ok || !step_reports[step]->verified)
+        {
+            report.status = step_reports[step]->status;
+            return report;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> cache(cache_mutex_);
+        motors_[index].mapping = limits;
+        motors_[index].mapping_confirmed = true;
+        valid_after_[index] = SteadyClock::now();
+        states_[index].valid = false;
+    }
+    report.verified = true;
+    return report;
+}
+
+ParameterWriteReport DamiaoBus::write_communication_timeout(MotorIndex index,
+    std::chrono::milliseconds timeout, Deadline deadline)
+{
+    ParameterWriteReport report;
+    const auto counts = timeout_counts_from_ms(timeout);
+    if (!counts.value)
+    {
+        report.status = counts.status;
+        return report;
+    }
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        report.status = {ErrorCode::WouldBlock, "Another management operation is active."};
+        return report;
+    }
+    return write_unlocked(index, RegisterId::Timeout, *counts.value, deadline);
 }
 
 Status DamiaoBus::command_unlocked(MotorIndex index, ManagementCommand command, Deadline deadline)
@@ -726,6 +907,11 @@ Status DamiaoBus::save_zero(MotorIndex index, Deadline deadline)
     return gate.code == ErrorCode::Ok ? command_unlocked(index, ManagementCommand::SaveZero, deadline) : gate;
 }
 
+Status DamiaoBus::save_zero_position(MotorIndex index, Deadline deadline)
+{
+    return save_zero(index, deadline);
+}
+
 Status DamiaoBus::save_parameters(MotorIndex index, Deadline deadline)
 {
     std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
@@ -745,7 +931,38 @@ Status DamiaoBus::save_parameters(MotorIndex index, Deadline deadline)
     const auto config = motor_config(index).value.value();
     const auto encoded = DamiaoProtocol::encode_save_parameters(config.address.esc_id);
     std::optional<RegisterValue> unused;
-    return transact(index, *encoded.value, 0xAA, 1, deadline, unused);
+    const auto status = transact(index, *encoded.value, 0xAA, 1, deadline, unused);
+    if (status.code == ErrorCode::Ok)
+    {
+        std::lock_guard<std::mutex> cache(cache_mutex_);
+        invalidate(index);
+    }
+    return status;
+}
+
+Status DamiaoBus::recover_maintenance()
+{
+    std::unique_lock<std::mutex> operation(operation_mutex_, std::try_to_lock);
+    if (!operation.owns_lock())
+    {
+        return {ErrorCode::WouldBlock, "Another management operation is active."};
+    }
+    std::lock_guard<std::mutex> cache(cache_mutex_);
+    if (state_ == BusState::Closed || stop_)
+    {
+        return {ErrorCode::Disconnected, "Bus is not open."};
+    }
+    if (state_ == BusState::Control)
+    {
+        return {ErrorCode::InvalidCommand, "Recover maintenance requires control to be ended first."};
+    }
+    pending_ = {};
+    for (std::size_t motor = 0; motor < motor_count_; ++motor)
+    {
+        invalidate(motor);
+    }
+    state_ = BusState::Maintenance;
+    return {};
 }
 
 Status DamiaoBus::begin_control()

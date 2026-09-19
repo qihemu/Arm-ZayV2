@@ -51,18 +51,6 @@ enum class BusState
     Fault
 };
 
-// 非原子写操作报告：超时不意味着电机没有执行，保留发送与读回证据。
-struct ParameterWriteReport
-{
-    Status status;
-    std::optional<RegisterValue> previous;
-    RegisterValue requested;
-    std::optional<RegisterValue> readback;
-    bool write_sent = false;
-    bool verified = false;
-    std::uint64_t configuration_revision = 0;
-};
-
 // 低频诊断快照；周期发送只更新计数与错误码，不拼接字符串。
 struct BusDiagnostics
 {
@@ -111,6 +99,12 @@ public:
     // 并发管理立即返回 WouldBlock；销毁对象前调用方必须结束全部外部调用。
     // 读取单个寄存器，并将请求与响应事务串行化。
     Result<RegisterValue> read_parameter(MotorIndex index, std::uint8_t rid, Deadline deadline);
+    // 读回控制模式寄存器 0x0A 并转换为 ControlMode。
+    Result<ControlMode> read_control_mode(MotorIndex index, Deadline deadline);
+    // 读回 PMAX/VMAX/TMAX 并组装 MappingLimits。
+    Result<MappingLimits> read_mapping_limits(MotorIndex index, Deadline deadline);
+    // 读回 TIMEOUT 寄存器并按 50μs/计数换算为毫秒。
+    Result<std::chrono::milliseconds> read_communication_timeout(MotorIndex index, Deadline deadline);
     // 读回映射范围、控制模式和固件版本，原子提交可信配置。
     Status synchronize_motor(MotorIndex index, Deadline deadline);
     // 主动查询并返回一帧指定电机的普通状态反馈。
@@ -120,6 +114,14 @@ public:
         const RegisterValue& value, Deadline deadline);
     // 写入并验证控制模式；成功后更新管理命令使用的模式。
     Status switch_mode(MotorIndex index, ControlMode mode, Deadline deadline);
+    // switch_mode 的语义别名，支持写入 MIT 等全部 ControlMode 值。
+    Status set_control_mode(MotorIndex index, ControlMode mode, Deadline deadline);
+    // 单次管理锁内顺序写入 PMAX/VMAX/TMAX，任一步失败即停止。
+    MappingLimitsWriteReport write_mapping_limits(MotorIndex index, const MappingLimits& limits,
+        Deadline deadline);
+    // 将毫秒超时换算为 TIMEOUT 计数并执行读-写-读回校验。
+    ParameterWriteReport write_communication_timeout(MotorIndex index,
+        std::chrono::milliseconds timeout, Deadline deadline);
     // 显式使能电机；上层须先完成已验证的保持目标和使能时序。
     Status enable(MotorIndex index, Deadline deadline);
     // 显式失能电机，并通过状态查询确认结果。
@@ -128,8 +130,12 @@ public:
     Status clear_error(MotorIndex index, Deadline deadline);
     // 将电机当前位置保存为零点，并确认命令响应。
     Status save_zero(MotorIndex index, Deadline deadline);
+    // save_zero 的语义别名。
+    Status save_zero_position(MotorIndex index, Deadline deadline);
     // 在维护状态且电机失能时保存当前参数配置。
     Status save_parameters(MotorIndex index, Deadline deadline);
+    // 清除事务超时等可恢复故障，回到维护态并作废全部反馈缓存。
+    Status recover_maintenance();
 
     // 只开放发送许可，不使能、不发送目标；要求全部反馈新鲜、使能且配置可信。
     Status begin_control();
@@ -166,7 +172,7 @@ private:
     Result<MotorState> query_unlocked(MotorIndex index, Deadline deadline);
     // 在已持有管理互斥时执行可验证的寄存器写事务。
     ParameterWriteReport write_unlocked(MotorIndex index, std::uint8_t rid,
-        const RegisterValue& value, Deadline deadline);
+        const RegisterValue& value, Deadline deadline, bool verify_disabled = true);
     // 在已持有管理互斥时发送管理命令并核对执行结果。
     Status command_unlocked(MotorIndex index, ManagementCommand command, Deadline deadline);
     // 持续接收传输帧，并将帧分派给事务等待者或反馈缓存。

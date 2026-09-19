@@ -104,6 +104,11 @@ int main()
 - 参数读取允许启动时尚未获得反馈，但使用方须确保是已停止的维护会话。
   任一已知使能轴会阻止参数事务；写入与存参数还要求全轴新鲜反馈确认失能。
   状态查询不与 Control 状态交错，周期状态使用接收缓存。
+- 类型化配置接口（维护态）：`read_control_mode`、`read_mapping_limits`、
+  `read_communication_timeout`；`set_control_mode`（含 MIT 模式写入）、
+  `write_mapping_limits`、`write_communication_timeout`（50μs/计数换算）、
+  `save_zero_position`（`save_zero` 别名）。通用寄存器仍用
+  `read_parameter` / `write_parameter_verified`；寄存器 ID 见 `RegisterId` 命名空间。
 - `enable`、`disable`、`clear_error`、`save_zero` 均为显式低频操作，
   通过后续独立状态查询确认相应状态；总线首版只开放位置速度模式的使能。
   **上层仍必须完成已验证的首次目标保持、使能顺序与停止/支撑策略。**

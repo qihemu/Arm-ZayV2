@@ -108,4 +108,26 @@ struct Result
 // 寄存器类型由新版手册表决定，不通过数值大小猜测。
 using RegisterValue = std::variant<float, std::uint32_t>;
 
+// 非原子写操作报告：超时不意味着电机没有执行，保留发送与读回证据。
+struct ParameterWriteReport
+{
+    Status status;
+    std::optional<RegisterValue> previous;
+    RegisterValue requested;
+    std::optional<RegisterValue> readback;
+    bool write_sent = false;
+    bool verified = false;
+    std::uint64_t configuration_revision = 0;
+};
+
+// PMAX/VMAX/TMAX 组合写报告，保留逐寄存器证据链。
+struct MappingLimitsWriteReport
+{
+    Status status;
+    ParameterWriteReport position;
+    ParameterWriteReport velocity;
+    ParameterWriteReport torque;
+    bool verified = false;
+};
+
 }  // namespace damiao
