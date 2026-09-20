@@ -1,3 +1,4 @@
+#include "action_sequence.hpp"
 #include "config.hpp"
 #include "motor_bus_session.hpp"
 #include "motor_scanner.hpp"
@@ -378,6 +379,108 @@ void test_config()
         "can_interface: can0\nmin_output_position_rad: 1\nmax_output_position_rad: -1\n"
         "max_output_speed_rad_s: 1\n").status.code == ErrorCode::InvalidConfiguration,
         "reversed limits rejected");
+    const auto with_sequence = parse_yaml(
+        valid + "action_sequence_file: demo_sequence.txt\n");
+    check(with_sequence.status.code == ErrorCode::Ok
+        && with_sequence.config.action_sequence_file == "demo_sequence.txt",
+        "optional action sequence field accepted");
+}
+
+std::string temporary_sequence(const std::string& content)
+{
+    char path[] = "/tmp/damiao-tools-sequence-XXXXXX";
+    const int fd = ::mkstemp(path);
+    check(fd >= 0, "create temporary sequence");
+    ::close(fd);
+    std::ofstream output(path);
+    output << content;
+    output.close();
+    return path;
+}
+
+void test_action_sequence_parse()
+{
+    const auto path = temporary_sequence(
+        "# comment\n"
+        "\n"
+        "M1 pos=0.5 ve=1.0\n"
+        "delay 10\n"
+        "M2 pos=-1.0 ve=0.2\n");
+    const auto parsed = parse_action_sequence_file(path);
+    ::unlink(path.c_str());
+    check(parsed.status.code == ErrorCode::Ok, "sequence parse succeeds");
+    check(parsed.steps.size() == 3, "sequence step count");
+    check(parsed.steps[0].kind == ActionStepKind::Move && parsed.steps[0].motor_one_based == 1,
+        "first move motor");
+    check(parsed.steps[1].kind == ActionStepKind::Delay && parsed.steps[1].delay_ms == 10,
+        "delay step");
+    check(parsed.steps[2].motor_one_based == 2, "second move motor");
+
+    const auto bad_path = temporary_sequence("M1 pos=1.0\n");
+    const auto bad = parse_action_sequence_file(bad_path);
+    ::unlink(bad_path.c_str());
+    check(bad.status.code == ErrorCode::InvalidConfiguration, "invalid move line rejected");
+}
+
+void test_action_sequence_delay_does_not_wait_for_move()
+{
+    std::vector<ActionStep> steps;
+    ActionStep first_move;
+    first_move.kind = ActionStepKind::Move;
+    first_move.motor_one_based = 1;
+    first_move.position_rad = 1.0;
+    first_move.speed_rad_s = 1.0;
+    steps.push_back(first_move);
+
+    ActionStep delay_step;
+    delay_step.kind = ActionStepKind::Delay;
+    delay_step.delay_ms = 40;
+    steps.push_back(delay_step);
+
+    ActionStep second_move;
+    second_move.kind = ActionStepKind::Move;
+    second_move.motor_one_based = 1;
+    second_move.position_rad = 2.0;
+    second_move.speed_rad_s = 1.0;
+    steps.push_back(second_move);
+
+    struct Event
+    {
+        char kind = 'M';
+        double position = 0.0;
+        SteadyClock::time_point at{};
+    };
+    std::vector<Event> events;
+    const auto start = SteadyClock::now();
+    std::atomic<bool> cancel{false};
+    ActionSequenceCallbacks callbacks;
+    callbacks.move = [&](std::size_t, double position_rad, double)
+    {
+        events.push_back({'M', position_rad, SteadyClock::now()});
+        return Status{};
+    };
+    callbacks.wait = [&](std::uint32_t delay_ms, const std::atomic<bool>&)
+    {
+        events.push_back({'D', static_cast<double>(delay_ms), SteadyClock::now()});
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    };
+    check(run_action_sequence(steps, callbacks, cancel).code == ErrorCode::Ok,
+        "callback sequence run succeeds");
+    check(events.size() == 3, "move delay move event count");
+    check(events[0].kind == 'M' && events[1].kind == 'D' && events[2].kind == 'M',
+        "event order");
+    const auto gap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        events[1].at - events[0].at).count();
+    check(gap_ms < 5, "delay follows move without waiting for motion completion");
+    const auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        events[2].at - events[1].at).count();
+    check(delay_ms >= 35, "second move starts after delay elapses");
+}
+
+void test_resolve_sequence_path()
+{
+    check(resolve_sequence_path("/cfg", "demo.txt") == "/cfg/demo.txt", "relative path joined");
+    check(resolve_sequence_path("/cfg", "/abs.seq") == "/abs.seq", "absolute path kept");
 }
 
 void test_scanner_finds_multiple_motors()
@@ -582,6 +685,9 @@ int main()
     try
     {
         test_config();
+        test_action_sequence_parse();
+        test_action_sequence_delay_does_not_wait_for_move();
+        test_resolve_sequence_path();
         test_scanner_finds_multiple_motors();
         test_bus_session_requires_enable_all_before_drive();
         test_bus_session_holds_other_axes();

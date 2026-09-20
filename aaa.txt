@@ -1,0 +1,14 @@
+
+./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-reg 0x07
+./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-reg 0x0A
+./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-state
+
+
+
+qihemu@qihemu-RedmiBook:~/qihemu_ws/can-motor-tool$ ./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-reg 0x07
+RID 0x7 = 17 (uint32)
+qihemu@qihemu-RedmiBook:~/qihemu_ws/can-motor-tool$ ./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-reg 0x0A
+RID 0xa = 2 (uint32)
+qihemu@qihemu-RedmiBook:~/qihemu_ws/can-motor-tool$ ./build/can_motor_tool --iface can0 --esc-id 1 --mst-id 0x11 read-state
+pos=-0.0452 vel=-0.0024 tau=0.0205 err=0x0(disabled) T_mos=31C T_rotor=29C
+qihemu@qihemu-RedmiBook:~/qihemu_ws/can-motor-tool$ 

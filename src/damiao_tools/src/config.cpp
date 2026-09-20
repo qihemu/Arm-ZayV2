@@ -19,10 +19,11 @@ constexpr std::array<const char*, 4> required_keys{
     "max_output_speed_rad_s"
 };
 
-constexpr std::array<const char*, 3> optional_keys{
+constexpr std::array<const char*, 4> optional_keys{
     "scan_esc_min",
     "scan_esc_max",
-    "scan_timeout_ms"
+    "scan_timeout_ms",
+    "action_sequence_file",
 };
 
 bool known_key(const std::string& key)
@@ -92,6 +93,10 @@ ConfigResult load_config(const std::string& path)
         if (root["scan_timeout_ms"])
         {
             config.scan_timeout_ms = root["scan_timeout_ms"].as<std::uint32_t>();
+        }
+        if (root["action_sequence_file"])
+        {
+            config.action_sequence_file = root["action_sequence_file"].as<std::string>();
         }
 
         if (config.can_interface.empty())

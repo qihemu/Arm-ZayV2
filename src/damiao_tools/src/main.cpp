@@ -1,3 +1,4 @@
+#include "action_sequence.hpp"
 #include "config.hpp"
 #include "console_output.hpp"
 #include "motor_manager.hpp"
@@ -5,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -13,10 +15,12 @@ namespace
 {
 
 volatile std::sig_atomic_t shutdown_requested = 0;
+std::atomic<bool> sequence_cancel_requested{false};
 
 void handle_signal(int)
 {
     shutdown_requested = 1;
+    sequence_cancel_requested.store(true);
 }
 
 void install_signal_handlers()
@@ -99,7 +103,33 @@ void print_menu(damiao_tools::MotorManager& manager)
         << "7. 重新扫描总线\n"
         << "8. 修改选中电机控制模式（须已失能）\n"
         << "9. 保存参数到 Flash（须已失能）\n"
+        << "10. 执行动作序列\n"
         << "0. 退出\n";
+}
+
+bool validate_move_steps(const std::vector<damiao_tools::ActionStep>& steps,
+    damiao_tools::MotorManager& manager, std::size_t& failed_step)
+{
+    for (std::size_t index = 0; index < steps.size(); ++index)
+    {
+        const auto& step = steps[index];
+        if (step.kind != damiao_tools::ActionStepKind::Move)
+        {
+            continue;
+        }
+        if (step.motor_one_based == 0 || step.motor_one_based > manager.motors().size())
+        {
+            failed_step = index + 1;
+            return false;
+        }
+        const auto& motor = manager.motors()[step.motor_one_based - 1];
+        if (!motor.operable || !motor.drivable)
+        {
+            failed_step = index + 1;
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace
@@ -123,6 +153,10 @@ int main(int argc, char** argv)
         damiao_tools::print_status_error(loaded.status);
         return 2;
     }
+    const std::filesystem::path config_path(argv[2]);
+    const std::string config_directory = config_path.has_parent_path()
+        ? config_path.parent_path().string()
+        : std::string(".");
 
     damiao_tools::MotorManager manager;
     const auto initialized = manager.scan_and_initialize(loaded.config);
@@ -369,6 +403,67 @@ int main(int argc, char** argv)
             else
             {
                 damiao_tools::print_status_error(result);
+            }
+            continue;
+        }
+        if (choice == 10)
+        {
+            if (!manager.all_enabled())
+            {
+                std::cerr << "请先执行菜单 3 使能全部电机。\n";
+                continue;
+            }
+            std::string sequence_path;
+            if (!loaded.config.action_sequence_file.empty())
+            {
+                sequence_path = damiao_tools::resolve_sequence_path(config_directory,
+                    loaded.config.action_sequence_file);
+            }
+            else
+            {
+                std::cout << "未在配置中设置 action_sequence_file。\n"
+                    << "输入动作序列文件路径（相对配置目录或绝对路径）> " << std::flush;
+                if (!std::getline(std::cin, line))
+                {
+                    break;
+                }
+                line = damiao_tools::resolve_sequence_path(config_directory, line);
+                if (line.empty())
+                {
+                    std::cerr << "路径不能为空。\n";
+                    continue;
+                }
+                sequence_path = line;
+            }
+            const auto parsed = damiao_tools::parse_action_sequence_file(sequence_path);
+            if (parsed.status.code != damiao::ErrorCode::Ok)
+            {
+                damiao_tools::print_status_error(parsed.status);
+                continue;
+            }
+            std::size_t failed_step = 0;
+            if (!validate_move_steps(parsed.steps, manager, failed_step))
+            {
+                std::cerr << "动作序列第 " << failed_step
+                    << " 步电机不可用或未处于位置速度模式。\n";
+                continue;
+            }
+            sequence_cancel_requested.store(false);
+            std::cout << "开始执行动作序列：" << sequence_path << "（共 "
+                << parsed.steps.size() << " 步）\n";
+            const auto run_result = damiao_tools::run_action_sequence(parsed.steps, manager,
+                sequence_cancel_requested);
+            if (run_result.code == damiao::ErrorCode::Ok)
+            {
+                std::cout << "动作序列执行完成。\n";
+            }
+            else if (sequence_cancel_requested.load() || shutdown_requested)
+            {
+                std::cerr << "动作序列已中断。\n";
+            }
+            else
+            {
+                damiao_tools::print_status_error(run_result);
             }
             continue;
         }

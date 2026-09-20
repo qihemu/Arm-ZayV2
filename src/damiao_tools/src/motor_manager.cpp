@@ -268,16 +268,27 @@ damiao::Status MotorManager::disable_all()
 
 damiao::Status MotorManager::drive_selected(double absolute_position_rad, double speed_rad_s)
 {
+    return drive_motor(selected_list_index_ + 1, absolute_position_rad, speed_rad_s);
+}
+
+damiao::Status MotorManager::drive_motor(std::size_t motor_one_based, double absolute_position_rad,
+    double speed_rad_s)
+{
     if (!session_)
     {
         return invalid_manager("Session is not initialized.");
     }
-    const auto session_index = session_index_for_list(selected_list_index_);
+    if (motor_one_based == 0 || motor_one_based > motors_.size())
+    {
+        return invalid_manager("Motor number out of range.");
+    }
+    const std::size_t list_index = motor_one_based - 1;
+    const auto session_index = session_index_for_list(list_index);
     if (!session_index)
     {
         return invalid_manager("Selected motor is not registered.");
     }
-    if (!motors_[selected_list_index_].drivable)
+    if (!motors_[list_index].drivable)
     {
         return invalid_manager("Selected motor is not in position-velocity mode.");
     }

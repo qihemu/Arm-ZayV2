@@ -18,6 +18,8 @@ struct ToolConfig
     std::uint16_t scan_esc_min = 1;
     std::uint16_t scan_esc_max = 15;
     std::uint32_t scan_timeout_ms = 200;
+    // 可选：相对 motor.yaml 目录或绝对路径的动作序列文本文件。
+    std::string action_sequence_file;
 };
 
 struct ConfigResult

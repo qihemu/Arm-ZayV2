@@ -40,6 +40,8 @@ public:
     damiao::Status enable_all();
     damiao::Status disable_all();
     damiao::Status drive_selected(double absolute_position_rad, double speed_rad_s);
+    damiao::Status drive_motor(std::size_t motor_one_based, double absolute_position_rad,
+        double speed_rad_s);
     damiao::Status clear_error_selected();
     damiao::Result<damiao::ControlMode> read_control_mode_selected();
     damiao::Status set_control_mode_selected(damiao::ControlMode mode);

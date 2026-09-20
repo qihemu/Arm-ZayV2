@@ -6,3 +6,5 @@ max_output_speed_rad_s: 3
 scan_esc_min: 1
 scan_esc_max: 15
 scan_timeout_ms: 200
+# 可选：动作序列文件（相对本 yaml 所在目录）
+action_sequence_file: demo_sequence.txt

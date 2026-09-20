@@ -9,6 +9,7 @@ find_package(yaml-cpp REQUIRED)
 # 包内支持库承载配置解析和会话状态机，不作为安装后的公共 C++ API。
 add_library(damiao_motor_tool_support STATIC
     src/config.cpp
+    src/action_sequence.cpp
     src/motor_scanner.cpp
     src/motor_bus_session.cpp
     src/motor_manager.cpp
@@ -34,7 +35,7 @@ target_link_libraries(damiao_motor_tool PRIVATE damiao_motor_tool_support)
 install(TARGETS damiao_motor_tool
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(FILES config/motor.example.yaml
+install(FILES config/motor.example.yaml config/demo_sequence.txt
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/config
 )
 install(FILES README.md package.xml

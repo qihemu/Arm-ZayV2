@@ -27,9 +27,20 @@ max_output_speed_rad_s: 3
 scan_esc_min: 1
 scan_esc_max: 15
 scan_timeout_ms: 200
+action_sequence_file: demo_sequence.txt
 ```
 
 `esc_id` / `mst_id` 由扫描自动发现，无需手写。
+
+可选 `action_sequence_file` 指向动作序列文本（相对本 yaml 所在目录或绝对路径）。示例见 `config/demo_sequence.txt`：
+
+```text
+M1 pos=0.0 ve=1.0
+delay 500
+M1 pos=1.0 ve=2.0
+```
+
+`delay` 只占用时间轴，不等待电机到位；延时结束后若上一电机仍在运动，会直接执行下一步（可能覆盖同轴目标）。
 
 ## 菜单
 
@@ -44,6 +55,7 @@ scan_timeout_ms: 200
 | 7 | 重新扫描（须已失能） |
 | 8 | 修改选中电机控制模式（须已失能；不写 Flash） |
 | 9 | 保存参数到 Flash（当前选中电机，须已失能） |
+| 10 | 执行动作序列（须已全部使能；可用配置路径或手动输入文件） |
 | 0 | 退出 |
 
 使能后工具以 100 Hz 批量重发全部轴目标；未选中轴保持当前位置。发送、反馈或电机故障会停止周期发送，
