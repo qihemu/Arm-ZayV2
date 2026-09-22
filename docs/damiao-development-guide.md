@@ -1,15 +1,15 @@
 # Arm-ZayV2 达妙电机接入与多电机调试工具开发文档
 
-版本：0.1（开发设计基线）  
-更新日期：2026-09-16\
-适用项目：`/home/wlzc/qihemu_ws/Arm-ZayV2`  
+版本：0.2（实现同步基线）<br>
+更新日期：2026-09-21<br>
+适用项目：`/home/wlzc/qihemu_ws/Arm-ZayV2`<br>
 适用环境：Linux / ROS 2 Humble / 达妙 J4310P-2EC 与 J4340-2EC 系列
 
 本文整合实体机械臂缺口分析、ros2_control 硬件插件设计，以及可独立运行的多电机调试工具方案，供后续编码、联调和验收使用。本文中的“应”“必须”为拟定的开发要求，不表示相应功能已经实现。
 
-**实现进展（2026-09-16）：项目已有 MoveIt、轨迹控制器和 Mock 硬件链路；`damiao_core` 已实现首版协议、SocketCAN、六轴缓存、维护事务和发送门控，当前能力与限制见 [核心库说明](../src/damiao_core/README.md)。`damiao_tools` 已实现最小单电机交互式链路测试工具，只覆盖严格 YAML 加载、注册、状态、使能、位置速度驱动和显式失能；完整调试会话、GUI 和真实 `SystemInterface` 插件尚未交付。核心库和工具仅完成模拟传输软件验证，vcan 与实体固件行为仍待验证；本轮未配置 CAN、刷写设备或驱动电机。本文其余“设计要求”和待实测项不因软件编码完成而自动视为通过。**
+**实现进展（2026-09-21）：项目已有 MoveIt、轨迹控制器和 Mock 硬件链路；`damiao_core` 0.1.0 已实现协议、寄存器表、SocketCAN、最多六轴缓存、维护事务、类型化配置接口、所有权和发送门控，当前能力与限制见 [核心库说明](../src/damiao_core/README.md)。`damiao_tools` 0.1.0 已实现单总线多电机扫描和菜单式 CLI：扫描 ESC_ID 1～15、最多注册六轴、查询全部状态、全轴使能/失能、选中轴位置速度驱动、清错、重新扫描、RAM 控制模式切换、Flash 参数保存以及动作序列执行。工具内部实际类名为 `MotorManager`、`MotorBusSession` 和 `DiscoveredMotor`。GUI、真实 `SystemInterface` 插件、目标有效期、参数导入导出和运行记录尚未交付。核心库与工具的软件测试通过，vcan 测试因未提供接口而跳过；实体固件、停止行为和机械安全仍待验证。本文其余“设计要求”和“待实测”项不因软件编码完成而自动视为通过。**
 
-文中的接口、目录、命令行和配置示例都是设计草案；标为模板的配置不能直接用于真机运动。硬件参数必须由实际设备读取、机械设计和实测结果补全。
+文中明确标为“当前实现”的接口、目录和命令行以 2026-09-21 源码为准；标为“拟新增”或“模板”的内容仍是后续设计。模板配置不能直接用于真机运动，硬件参数必须由实际设备读取、机械设计和实测结果补全。
 
 ## 1. 目标、范围与设计决策
 
@@ -75,16 +75,16 @@ STM32 中间控制器、CANopen/CiA 402、自研电流环、固件升级、视�
 ### 2.2 关键缺口
 
 
-| 编号  | 缺口                   | 首个交付成果                  |
-| --- | -------------------- | ----------------------- |
-| G01 | 真实机械参数、负载和停止方式未确定    | 六轴参数表、负载核算、失能支撑方案       |
-| G02 | 电机与主机通信尚未形成可验收链路     | 单电机参数读取和反馈记录            |
-| G03 | 没有项目级通用电机库           | `damiao_core` 与协议测试     |
-| G04 | 没有独立多电机调试工具          | `damiao_tools` CLI      |
-| G05 | 没有真实 ros2_control 插件 | `damiao_hardware`，先单轴测试 |
-| G06 | 缺少关节名、电机 ID、零位、方向映射  | 标定配置及重启验证记录             |
-| G07 | 缺少整机运行许可与故障联动        | 管理状态机和故障注入报告            |
-| G08 | 规划与 Servo 控制权未统一管理   | 单一真机 bringup 和模式切换流程    |
+| 编号  | 缺口或成果                  | 当前状态（2026-09-21）              | 下一验收证据                  |
+| --- | ----------------------- | ----------------------------- | ----------------------- |
+| G01 | 真实机械参数、负载和停止方式未确定       | 未完成                           | 六轴参数表、负载核算、失能支撑方案       |
+| G02 | 电机与主机通信尚未形成可验收链路        | 软件模拟完成，vcan 与实机未完成            | 单电机参数读取、原始帧和反馈记录        |
+| G03 | 项目级通用电机库               | `damiao_core` 0.1.0 已实现并通过软件测试 | vcan 与实体协议验证             |
+| G04 | 独立多电机调试工具              | `damiao_tools` 0.1.0 CLI 已实现      | M4 停止、断连和实机受限运动报告       |
+| G05 | 没有真实 ros2_control 插件    | 未开始                           | `damiao_hardware`，先单轴测试 |
+| G06 | 缺少关节名、电机 ID、零位、方向映射     | 未完成                           | 标定配置及重启验证记录             |
+| G07 | 缺少整机运行许可与故障联动           | 核心/CLI 有局部门控，整机层未完成           | 管理状态机和故障注入报告            |
+| G08 | 规划与 Servo 控制权未统一管理      | 未完成                           | 单一真机 bringup 和模式切换流程    |
 
 
 协议分析文档中提到的 `can-motor-tool` 在本次检查的项目内和相邻约定路径均不存在，不计为已有工具。已有介绍性文档保留其参考价值，后续验收以当前源码和运行记录为准。
@@ -120,7 +120,9 @@ flowchart TB
 | `SocketCanTransport`   | Socket 收发、帧元信息、错误检测         | 不解释关节或运动意图           |
 | `DamiaoBus`            | 电机清单、反馈索引、状态缓存、管理事务         | 不执行 MoveIt 轨迹插值      |
 | `DamiaoSystemHardware` | 生命周期、关节转换、接口导出、读写门控         | 不独立启动重复的周期发送循环       |
-| `MotorDebugSession`    | 调试目标、有效期、周期运行、停止流程          | 不重新实现报文编解码           |
+| `MotorManager`         | 扫描结果、菜单电机编号和 `MotorBusSession` 编排 | 不直接实现协议编解码           |
+| `MotorBusSession`      | 全轴使能/失能、目标保持、100 Hz 周期发送和维护操作 | 当前尚不实现目标有效期和停止轨迹     |
+| `scan_motors`          | ESC_ID 范围探测、基础寄存器与状态读取          | 不负责控制会话和周期运动          |
 | CLI / GUI              | 输入、配置展示、记录、结果反馈             | GUI 线程不直接承担周期 CAN 调度 |
 | 整机管理层                  | 规划/Servo 模式、启停许可、故障恢复和控制权交接 | 不绕过核心库重复发送底层帧        |
 
@@ -237,11 +239,12 @@ Flash 保存一次涉及全部相关参数，手册提示最多约 30 ms、约�
 
 安装内容包括头文件、动态库、CMake package config/version 和导出 target。设置版本与 SOVERSION；对外 C++ ABI 在发布时固定编译器/标准库组合，不能把动态库形式理解为跨所有平台和编译器的 ABI 保证。
 
-如希望用 colcon 统一构建，可增加纯 CMake 包的发现元数据，但核心源码和独立构建流程不应依赖 ament。GUI 和 YAML 解析依赖放在工具或配置适配层。
+当前已提供构建类型为 `cmake` 的 `package.xml`，可由 colcon 发现和构建；核心源码和独立构建流程不依赖 ament。GUI 和 YAML 解析依赖放在工具或配置适配层。
 
-### 6.2 数据类型草案
+### 6.2 当前公共数据类型
 
-以下 C++17 代码只定义数据契约，不包含可运行通信实现。
+以下 C++17 代码摘自当前公共头文件的数据契约；完整定义以
+[`types.hpp`](../src/damiao_core/include/damiao_core/types.hpp) 为准。
 
 ```cpp
 #include <chrono>
@@ -253,6 +256,9 @@ Flash 保存一次涉及全部相关参数，手册提示最多约 30 ms、约�
 namespace damiao
 {
 
+using SteadyClock = std::chrono::steady_clock;
+using Deadline = SteadyClock::time_point;
+
 // 模式枚举使用寄存器编码，协议层另行计算 CAN ID 偏移。
 enum class ControlMode : std::uint32_t
 {
@@ -260,6 +266,12 @@ enum class ControlMode : std::uint32_t
     PositionVelocity = 2,
     Velocity = 3,
     PositionCurrentLimit = 4
+};
+
+struct MotorAddress
+{
+    std::uint16_t esc_id = 0;
+    std::uint16_t mst_id = 0;
 };
 
 // 三个量是编解码映射范围，不代表机械关节限位。
@@ -279,7 +291,7 @@ struct MotorState
     std::uint8_t raw_status = 0;
     std::uint8_t mos_temperature_c = 0;
     std::uint8_t rotor_temperature_c = 0;
-    std::chrono::steady_clock::time_point received_at{};
+    SteadyClock::time_point received_at{};
     std::uint64_t sequence = 0;
     std::uint64_t mapping_revision = 0;
     bool valid = false;
@@ -304,7 +316,11 @@ enum class ErrorCode
     MotorFault,
     OwnershipConflict,
     AmbiguousReply,
-    PartialFailure
+    PartialFailure,
+    Unsupported,
+    InvalidFrame,
+    WouldBlock,
+    NotExecuted
 };
 
 // 文本供低频诊断使用；周期路径只记录预分配的错误码与上下文。
@@ -323,6 +339,28 @@ struct Result
 
 using RegisterValue = std::variant<float, std::uint32_t>;
 
+// 寄存器写入并非原子事务，报告保留原值、请求值、读回值和发送证据。
+struct ParameterWriteReport
+{
+    Status status;
+    std::optional<RegisterValue> previous;
+    RegisterValue requested;
+    std::optional<RegisterValue> readback;
+    bool write_sent = false;
+    bool verified = false;
+    std::uint64_t configuration_revision = 0;
+};
+
+// PMAX/VMAX/TMAX 顺序写入的逐项证据。
+struct MappingLimitsWriteReport
+{
+    Status status;
+    ParameterWriteReport position;
+    ParameterWriteReport velocity;
+    ParameterWriteReport torque;
+    bool verified = false;
+};
+
 }  // namespace damiao
 ```
 
@@ -331,20 +369,26 @@ using RegisterValue = std::variant<float, std::uint32_t>;
 ### 6.3 总线与会话接口契约
 
 
-| 操作                              | 输入/输出                    | 约束                           |
-| ------------------------------- | ------------------------ | ---------------------------- |
-| `open` / `close`                | 总线配置 / 状态                | 打开不使能、不切模式、不保存参数；活动会话先停止再关闭  |
-| `register_motor`                | 电机配置 / 固定索引              | 运行前完成注册；周期内不扩容               |
-| `snapshot` / `snapshot_into`    | 电机索引或预分配数组 / 状态          | 一致快照；无有效反馈时明确失败或 valid=false |
-| `read_parameter`                | 电机、RID、deadline / 类型化值   | 非实时管理路径；限时并匹配回应              |
-| `write_parameter_verified`      | 电机、RID、值、deadline / 执行报告 | 写入后读回，不自动存 Flash             |
-| `switch_mode`                   | 电机、模式 / 状态               | 要求维护许可；更新本地模式并重新建立保持目标       |
-| `enable` / `disable`            | 指定电机 / 状态                | 与连接、清错、保存零点分离                |
-| `send_position_velocity_batch`  | 固定数量命令 / 逐帧发送结果          | 先全量检查再发送；非阻塞或严格有界；不承诺多帧原子性   |
-| `save_parameters` / `save_zero` | 电机 / 执行报告                | 独立操作；记录前置条件、结果和配置变更          |
+| 当前 `DamiaoBus` 操作 | 输入/输出 | 约束 |
+| -------------------- | --------- | ---- |
+| `register_motor` | `MotorConfig` / `Result<MotorIndex>` | 只允许在 `Closed` 状态注册，最多六轴 |
+| `open` / `close` | `BusConfig` / `Status` | 打开不使能、不切模式、不保存参数；`Control` 状态拒绝关闭 |
+| `state` / `diagnostics` / `motor_config` | 生命周期、诊断和可信配置快照 | 低频观察接口 |
+| `snapshot` / `snapshot_into` | 电机索引或预分配数组 / 状态 | 检查有效性、新鲜度和映射版本；后者返回整体 `ErrorCode` |
+| `read_parameter` / `write_parameter_verified` | 电机、RID、值、绝对 `Deadline` | 维护态类型化事务；写入返回 `ParameterWriteReport`，不自动存 Flash |
+| `read_control_mode` / `set_control_mode` | 电机、模式、绝对 `Deadline` | `set_control_mode` 是当前工具使用的名称；`switch_mode` 为等价接口 |
+| `read_mapping_limits` / `write_mapping_limits` | PMAX/VMAX/TMAX / 组合写报告 | 组合写入逐项执行，不具备设备侧原子性 |
+| `read_communication_timeout` / `write_communication_timeout` | 毫秒 / 类型化结果或写报告 | 内部按 50 μs/计数换算并读回验证 |
+| `synchronize_motor` / `query_state` | 电机、绝对 `Deadline` | 同步模式、映射和固件；状态使用独立查询帧 |
+| `enable` / `disable` / `clear_error` | 电机、绝对 `Deadline` / `Status` | 与连接、模式和参数保存分离 |
+| `save_zero` / `save_zero_position` | 电机、绝对 `Deadline` / `Status` | 两者当前为语义别名，都会改变坐标基准 |
+| `save_parameters` | 电机、绝对 `Deadline` / `Status` | 失能维护态操作，不在周期路径执行 |
+| `recover_maintenance` | 无 / `Status` | 只清除允许恢复的本地故障并作废缓存，不自动重连或使能 |
+| `begin_control` / `end_control` | 无 / `Status` | 只改变发送许可，不负责使能、停车或失能 |
+| `send_position_velocity_batch` | 预分配命令和逐轴结果数组 / `ErrorCode` | 先全量检查再发送；不承诺多帧原子性，失败不重试 |
 
 
-这些名称是接口设计，不是已发布 ABI。最终头文件应注明线程安全级别、允许状态、时间上限及错误返回；运行时发送结果使用预分配存储，避免在控制周期中构造字符串和动态容器。
+这些名称是 `damiao_core` 0.1.0 的当前公共接口，但仍处于开发期，不承诺后续版本的 C++ ABI 不变。线程安全级别、允许状态、截止时间及失败语义以公共头文件注释为准；周期接口使用调用方预分配存储，避免构造诊断字符串或动态结果容器。
 
 ## 7. 线程、调度与控制频率
 
@@ -355,12 +399,12 @@ using RegisterValue = std::variant<float, std::uint32_t>;
 | --------------------- | -------------------------------- | --------------- |
 | CAN 接收线程              | 接收、检查、解码、更新时间戳和缓存                | 不能被 GUI 或磁盘日志阻塞 |
 | controller_manager 循环 | read → controller update → write | ROS 模式的唯一周期命令来源 |
-| 调试会话工作线程              | 维护目标有效期并周期发送                     | 独立工具模式的唯一周期命令来源 |
+| `MotorBusSession` 工作线程 | 当前以 100 Hz 周期发送最新全轴目标；目标有效期待扩展 | 独立工具模式的唯一周期命令来源 |
 | 管理路径                  | 参数事务、模式操作、配置文件处理                 | 首版仅在维护会话中执行     |
 | GUI/记录线程              | 展示快照、绘图、异步写盘                     | 不决定电机周期是否按时发生   |
 
 
-核心 `DamiaoBus` 可以维护接收线程，但不默认启动无限重发最后命令的周期线程。`MotorDebugSession` 是工具的可复用执行逻辑，ROS 插件不再启动它的周期循环。
+核心 `DamiaoBus` 维护一个接收线程，但不启动无限重发最后命令的周期线程。当前 CLI 的 `MotorBusSession::control_loop()` 以 100 Hz 复制并批量发送最新目标；ROS 插件不得复用或重复启动这一工具周期循环。
 
 反馈缓存使用有界同步机制；首版可使用短临界区复制固定数组，但需测量锁等待。若改用双缓冲、无锁队列或序列锁，必须保证 C++ 内存模型下无数据竞争，不能通过“只有一个写线程”推断普通字段读写安全。
 
@@ -497,6 +541,24 @@ motor_speed_limit = extra_reduction * joint_speed_limit
 
 ### 9.3 配置分层
 
+当前 `damiao_tools::ToolConfig` 使用扁平 YAML，只保存接口、所有扫描到电机共用的受限运动范围、扫描参数和可选动作序列路径。ESC_ID、MST_ID、模式、PMAX、VMAX、TMAX 和固件版本由 `scan_motors()` 读取，不从当前 YAML 指定：
+
+```yaml
+# 当前 damiao_tools 0.1.0 配置；示例运动范围仍须用台架值替换。
+can_interface: can0
+min_output_position_rad: -12.5
+max_output_position_rad: 12.5
+max_output_speed_rad_s: 3
+scan_esc_min: 1
+scan_esc_max: 15
+scan_timeout_ms: 200
+action_sequence_file: demo_sequence.txt
+```
+
+`can_interface`、位置上下限和最大速度是必填字段；扫描范围、单地址扫描超时和动作序列路径可选。`load_config()` 严格拒绝未知字段、缺失字段、非有限数、无序限位和越界扫描范围。当前限位对全部已注册电机共用，尚未提供逐轴配置、标定配置或参数导出快照。
+
+下表是 ROS 插件和后续完整配置工作流的拟新增分层，不表示当前 CLI 已支持这些文件：
+
 
 | 配置文件（拟新增）                | 使用者                      | 内容                    |
 | ------------------------ | ------------------------ | --------------------- |
@@ -509,7 +571,7 @@ motor_speed_limit = extra_reduction * joint_speed_limit
 
 核心库接受已解析的 C++ 配置对象。可设置一个供 CLI 和 ROS 共同使用的非实时配置解析模块；不要让实时 read/write 解析 YAML，也不要把 YAML 文件读取写进纯协议层。
 
-以下是两电机配置模板，数值为 null 的项目必须补全后才能启动运动。型号与地址仅表示格式，不代表真实电机分配。
+以下是后续 `motors.yaml` 两电机配置模板，当前 `damiao_tools::load_config()` 不解析该结构。数值为 null 的项目必须补全后才能启动运动；型号与地址仅表示格式，不代表真实电机分配。
 
 ```yaml
 # 设计模板；null 代表未确认，加载器必须据此禁止运动。
@@ -608,7 +670,7 @@ stateDiagram-v2
 | 电机通信超时     | 电机多久未收到其认可的命令       | 电机固件 + 配置层        | TIMEOUT 按 50 μs/计数换算并读回确认 |
 | 反馈超时       | 主机多久未收到某轴有效状态       | 核心缓存 + 插件/会话      | 按每轴接收时间判断，不能由其他轴反馈刷新      |
 | 控制循环超期     | 主机周期是否停止或严重延迟       | 插件/会话             | 记录超期；不自动继续执行过时队列          |
-| 调试目标过期     | 调试动作是否超过有效期或授权会话已结束 | MotorDebugSession | 恒定位置可以是有效保持目标，不能凭数值没变判过期  |
+| 调试目标过期     | 调试动作是否超过有效期或授权会话已结束 | 后续扩展 `MotorBusSession` | 当前尚未实现；恒定位置可以是有效保持目标，不能凭数值没变判过期 |
 | Servo 输入超时 | 连续输入是否中断            | Servo + 整机管理      | 核对实际停止输出与硬件停止结果           |
 | 规划任务状态     | 任务是否取消、执行失败或超过允许时长  | MoveIt/JTC + 业务层  | 长轨迹不能按“最近没有新消息”简单误判       |
 
@@ -672,52 +734,62 @@ JTC inactive 不等于插件已关闭 CAN；硬件 inactive 也不自动证明�
 
 首版仅允许在线只读状态监测；可能改变坐标、模式、ID 或映射的操作必须转入维护状态。若未来把 CAN 所有权移动到独立守护进程，插件与其之间还需重新设计 IPC 延迟、队列、watchdog 和失联行为，不属于简单增加一个 GUI 按钮。
 
-## 12. 多电机调试工具设计
+## 12. 多电机调试工具实现与后续设计
 
 ### 12.1 CLI 功能分组
 
-当前最小可执行文件名为 `damiao_motor_tool`。程序从 YAML 加载一台电机，启动时自动注册、连接、同步参数并查询状态，随后使用阻塞式 REPL 等待命令。CAN 接收和 100 Hz 运动保持由后台线程执行。
+当前可执行文件名为 `damiao_motor_tool`。程序通过 `--file <motor.yaml>` 加载严格 YAML，随后由 `scan_motors()` 扫描配置范围内的 ESC_ID，读取 MST_ID、控制模式、PMAX、VMAX、TMAX、固件版本和状态。`MotorManager::scan_and_initialize()` 最多选择六台可注册电机建立 `MotorBusSession`；非位置速度模式电机也可注册和维护，但不能参与当前运动控制。
 
 
-| 命令 | 当前行为 |
-| ---- | -------- |
-| `status` | 维护态主动查询、控制态读取缓存，显示位置、速度、状态、温度和反馈年龄 |
-| `enable` | 从当前反馈位置建立保持目标，显式使能并启动 100 Hz 周期发送 |
-| `drive <position_rad> <speed_rad_s>` | 更新输出轴绝对位置及最大绝对速度，按 YAML 限位拒绝非法值 |
-| `disable` | 停止周期发送、撤销控制许可并显式失能 |
-| `help` / `quit` | 显示命令或关闭主机通信；退出不会自动失能 |
+| 菜单 | 当前实现调用与行为 |
+| ---- | ------------------ |
+| 1 选择电机 | `MotorManager::select_motor()`，选择后续单轴维护或驱动目标 |
+| 2 查询全部状态 | `MotorManager::status_all()`；维护态主动查询，控制态读取缓存 |
+| 3 使能全部电机 | `MotorBusSession::enable_all()`；要求全部已注册轴处于位置速度模式和失能状态，从实际位置初始化保持目标后逐轴使能并启动 100 Hz 发送 |
+| 4 失能全部电机 | `MotorBusSession::disable_all()`；停止周期线程、撤销发送许可、逐轴失能并再次查询状态 |
+| 5 驱动选中电机 | `MotorManager::drive_selected()`；更新选中轴绝对输出位置和最大绝对速度，其他轴继续保持最新目标 |
+| 6 清错 | `MotorManager::clear_error_selected()`；要求控制停止且全部轴确认失能 |
+| 7 重新扫描 | `MotorManager::rescan()`；要求全轴失能，关闭当前会话后重新扫描和注册 |
+| 8 修改控制模式 | `MotorManager::set_control_mode_selected()` → `MotorBusSession::set_control_mode()` → `DamiaoBus::set_control_mode()`；读回确认，只修改 RAM |
+| 9 保存参数到 Flash | `MotorManager::save_parameters_selected()`；要求全轴失能，保存后等待目标轴恢复并重新同步 |
+| 10 执行动作序列 | `parse_action_sequence_file()` 和 `run_action_sequence()`；顺序更新指定 M 编号目标并执行显式延时 |
+| 0 退出 | `MotorManager::shutdown()`；停止主机周期发送并关闭总线，不自动失能电机 |
 
 
-工具不会切换模式、清错、保存参数或自动失能。使能后持续发送最新目标；发送或反馈故障会停止周期发送并等待用户显式执行 `disable`。`quit`、Ctrl-C 和 EOF 只撤销主机发送许可并关闭 SocketCAN，电机后续行为取决于其 TIMEOUT 和固件状态。
+启动、扫描、重扫和连接不会自动使能。使能后 `MotorBusSession::control_loop()` 每 10 ms 调用 `DamiaoBus::send_position_velocity_batch()` 发送全部已注册轴的最新目标；`WouldBlock` 且总线仍为 `Control` 时视为瞬时竞争，其他发送或反馈故障会停止周期发送并记录 `background_error()`。故障和普通退出均不会自动失能，用户须先执行菜单 4；Ctrl-C、SIGTERM、EOF 和菜单 0 只停止主机发送并关闭 SocketCAN，电机后续行为取决于 TIMEOUT、固件和机械保护。
 
 当前交互方式：
 
 ```text
-damiao_motor_tool --file motor.yaml
-damiao[MAINTENANCE]> status
-damiao[MAINTENANCE]> enable
-damiao[CONTROL]> drive <输出轴绝对位置 rad> <最大绝对速度 rad/s>
-damiao[CONTROL]> disable
-damiao[MAINTENANCE]> quit
+damiao_motor_tool --file src/damiao_tools/config/motor.example.yaml
+[can0] 选中 M1 | 已使能 0/6 | 总线 MAINTENANCE
+请选择操作> 3
+全部电机已使能，后台保持目标已启动。
+请选择操作> 5
+输入目标位置(rad)> 0.2
+输入最大速度(rad/s)> 0.5
 ```
 
-当前工具只注册 YAML 中的一台电机，不存在广播操作。配置必须提供 CAN 接口、ESC_ID、MST_ID、输出轴位置上下限和最大速度；示例限位为空，必须由台架核对后填写。
+动作序列支持 `M<n> pos=<rad> ve=<rad/s>` 与 `delay <ms>`。`delay` 只推进主机时间线，不等待上一轴到位；若同一轴尚在运动，后续目标会覆盖旧目标。解析器拒绝空序列、非法 M 编号语法、非有限数、非正延时以及大于 3,600,000 ms 的单次延时；执行前还会检查引用电机已注册且处于位置速度模式。当前没有到位判定、轨迹插值或多轴同步到达保证。
 
 ### 12.2 调试会话与限制
 
-以下是完整调试会话的后续要求，当前最小工具只实现 12.1 节行为，尚无目标有效期、
-`prepare-motion`、多轴操作或配置回写：
+当前 CLI 已完成扫描、多轴保持、选中轴驱动、模式维护、Flash 保存和动作序列的软件实现，但以下 M4 能力仍未实现或未完成实机验收：
 
-- 完整位置速度测试应使用有限幅度、有限速度和有限会话期限，目标从实际位置开始。
-- `prepare-motion` 检查参数、反馈、限制和停止策略，不隐式修改电机零点。
-- 多轴运动发送前检查完整目标集，记录实际逐帧发送情况；不宣传严格同时到达。
-- 单电机调试时，未选择轴是否失能或保持，由会话配置明确规定，禁止静默改变。
-- 错误退出不报告运动成功；批量操作返回逐电机明细及整体非成功退出码。
+- 当前目标只有位置/速度限幅，没有目标有效期、会话期限、变化率/加速度限制或独立 `prepare-motion` 步骤。
+- 所有已注册轴必须同时处于位置速度模式才能执行 `enable_all()`；使能后未选中轴保持使能前读取的位置。
+- `enable_all()` 和 `disable_all()` 当前按注册顺序逐轴执行；中途失败不会自动回滚，调用方必须查询全部状态并显式处置可能已执行的轴。
+- 动作序列的“执行完成”只表示所有目标更新和延时步骤已执行，不表示电机到位。
+- `send_position_velocity_batch()` 内部具有逐轴错误数组，但当前 CLI 未将每周期逐轴结果持久化为运行报告。
+- 模式切换和 Flash 保存已有读回/重新同步流程，但没有参数导入导出、配置备份、审计记录或批量非原子结果界面。
+- 当前 100 ms 反馈期限、5 ms 管理静默期、2 s 管理操作期限和 100 Hz 周期为代码常量，尚未形成经实机批准的配置基线。
+- 软件测试不证明首次使能无跳变、TIMEOUT 有效、断连可物理停车或承重轴失能安全。
+- 错误退出不应报告运动成功；后续实机验收仍需记录逐电机结果、初始状态和恢复流程。
 - 使用配置文件记录标定或持久化结果时，原文件先备份，再使用原子文件替换；设备参数的多步更新仍不具备原子性。
 
 ### 12.3 GUI 结构
 
-GUI 通过 `MotorDebugSession` 调用核心库，支持电机列表、状态卡片、参数表、曲线、操作记录和连接/控制权指示。界面刷新可低于控制频率，两者独立。
+GUI 尚未实现。后续若复用当前工具代码，应先将包内静态支持库中的 `MotorManager` / `MotorBusSession` 整理成明确的公共接口，再提供电机列表、状态卡片、参数表、曲线、操作记录和连接/控制权指示。界面刷新可低于控制频率，两者独立。
 
 参数页显示单位、类型、只读/可写、实际值、拟写值、读回确认和是否已存储；区分主机配置与电机寄存器。状态页始终显示数据是否过期，不把冻结曲线当作正常实时数据。
 
@@ -727,10 +799,10 @@ GUI 框架后续按项目需求选定；若使用 Python 界面，可为核心�
 
 ## 13. 建议工程布局与构建接入
 
-### 13.1 新增模块
+### 13.1 当前与拟新增模块
 
-以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`；`damiao_core` 和最小
-`damiao_tools` 已创建，`damiao_hardware`、`zayv2_bringup` 及完整工具接口仍是待建结构：
+以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`。`damiao_core` 和
+`damiao_tools` 是当前实际结构；`damiao_hardware`、`zayv2_bringup` 仍是待建结构：
 
 ```text
 src/
@@ -739,17 +811,25 @@ src/
 │   ├── cmake/damiao_coreConfig.cmake.in
 │   ├── include/damiao_core/
 │   │   ├── types.hpp
+│   │   ├── registers.hpp
 │   │   ├── protocol.hpp
 │   │   ├── transport.hpp
 │   │   └── bus.hpp
-│   ├── src/
-│   └── test/
+│   ├── src/{registers,protocol,socket_can_transport,bus}.cpp
+│   └── test/{core_tests,vcan_tests}.cpp
 ├── damiao_tools/
 │   ├── CMakeLists.txt
 │   ├── package.xml
 │   ├── src/
-│   ├── config/motor.example.yaml
-│   └── test/
+│   │   ├── config.{hpp,cpp}
+│   │   ├── motor_scanner.{hpp,cpp}
+│   │   ├── motor_bus_session.{hpp,cpp}
+│   │   ├── motor_manager.{hpp,cpp}
+│   │   ├── action_sequence.{hpp,cpp}
+│   │   ├── console_output.{hpp,cpp}
+│   │   └── main.cpp
+│   ├── config/{motor.example.yaml,demo_sequence.txt}
+│   └── test/tools_tests.cpp
 ├── damiao_hardware/
 │   ├── CMakeLists.txt
 │   ├── package.xml
@@ -764,25 +844,27 @@ src/
     └── launch/
 ```
 
-`damiao_tools` 保持独立 CMake 构建能力；当前会话支持代码仅为包内静态目标，不安装公共头文件。后续 GUI 若需要复用，应先把完整调试会话整理为明确的公共接口。机器人真实 description/MoveIt 配置可在核对实体模型后迁移到明确的 ZayV2 包名，避免以 Aubo 名称暗示已经完成模型替换。
+`damiao_tools` 通过 `damiao_motor_tool_support` 包内静态目标组织配置、扫描、会话、管理器、动作序列和输出代码，只安装 `damiao_motor_tool` 可执行文件、示例配置和说明，不安装公共头文件。后续 GUI 若需要复用，应先把会话整理为明确的公共接口。机器人真实 description/MoveIt 配置可在核对实体模型后迁移到明确的 ZayV2 包名，避免以 Aubo 名称暗示已经完成模型替换。
 
 代码遵循项目约定：4 空格缩进，C++ 大括号换行，关键代码块添加简明注释。新增接口需注明单位、坐标系、有效性、线程约束和失败行为。复用第三方代码时保留许可证与来源，记录参考提交版本。
 
 ### 13.2 核心库构建片段
 
-下列片段说明 target 与安装设计；对应源码及完整测试目标尚未创建。
+下列片段是当前 `damiao_core` 构建的缩略版本；共享库、安装导出、Config/Version 和软件/vcan 测试目标均已创建：
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
 project(damiao_core VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 find_package(Threads REQUIRED)
 
 # 纯 C++ 共享库供独立工具与 ROS 插件共同链接。
 add_library(damiao_core SHARED
     src/protocol.cpp
-    src/socketcan_transport.cpp
+    src/socket_can_transport.cpp
+    src/registers.cpp
     src/bus.cpp
 )
 add_library(damiao_core::damiao_core ALIAS damiao_core)
@@ -797,7 +879,7 @@ set_target_properties(damiao_core PROPERTIES
     SOVERSION 0
 )
 
-# 安装头文件和导出 target；完整工程另生成 Config/Version 文件。
+# 安装头文件和导出 target；源码还生成并安装 Config/Version 文件。
 install(TARGETS damiao_core EXPORT damiao_coreTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -810,7 +892,7 @@ install(EXPORT damiao_coreTargets
 )
 ```
 
-完整 package config 使用 `CMakePackageConfigHelpers` 生成可定位的 Config/Version 文件，安装到同一目录。消费者使用 `find_package(damiao_core CONFIG REQUIRED)`。不要让独立工具依赖整个 ROS 工作区才能找到核心库。
+当前 package config 使用 `CMakePackageConfigHelpers` 生成可定位的 Config/Version 文件并安装到同一目录。消费者使用 `find_package(damiao_core CONFIG REQUIRED)`；`damiao_tools` 还依赖 `yaml-cpp` 和 `Threads`，但不依赖 ROS。不要让独立工具依赖整个 ROS 工作区才能找到核心库。
 
 ### 13.3 ROS 插件注册
 
@@ -984,36 +1066,36 @@ flowchart LR
 ### 16.2 阶段交付与退出条件
 
 
-| 阶段  | 交付物                           | 完成条件                             |
-| --- | ----------------------------- | -------------------------------- |
-| M0  | 设备清单、台架、供电、ID 计划、停止方案         | 型号/电压明确，受限台架测试条件具备；带载阶段另需负载与支撑验证 |
-| M1  | 协议层、类型、寄存器表、配置校验              | 已知帧向量、边界、非法值和类型测试通过              |
-| M2  | SocketCAN 传输、总线、模拟电机、所有权      | 路由、期限、断开、竞争和状态缓存测试通过             |
-| M3  | CLI inspect/read、实机反馈报告       | 读回模式和映射，区分 p_m/xout/POS，单轴状态可靠   |
-| M4  | 持续调试会话、参数导入导出、记录              | 单轴受限运动/停止/断连验证通过，多电机维护结果可追溯      |
-| M5  | 插件、pluginlib 注册、单轴描述与启动配置     | 安装空间能加载，生命周期正确，JTC 驱动单轴并发布真实状态   |
-| M6  | 六轴配置与标定、整机故障联动                | 无串轴，周期与反馈满足预算，逐轴断连故障测试通过         |
-| M7  | 真实 description/MoveIt 配置和业务整改 | 小幅关节轨迹、点到点、笛卡尔路径与取消均有实测结果        |
-| M8  | Servo 管理、持续运行记录、性能整定          | 控制权切换、输入过期、温升和故障恢复达到项目指标         |
+| 阶段  | 交付物 | 当前状态（2026-09-21） | 完成条件 |
+| --- | ------ | -------------------- | ------ |
+| M0  | 设备清单、台架、供电、ID 计划、停止方案 | 未完成 | 型号/电压明确，受限台架测试条件具备；带载阶段另需负载与支撑验证 |
+| M1  | 协议层、类型、寄存器表、配置校验 | 软件实现与测试已完成 | 已知帧向量、边界、非法值和类型测试通过 |
+| M2  | SocketCAN 传输、总线、模拟电机、所有权 | 软件模拟已完成；vcan 未执行 | 路由、期限、断开、竞争、状态缓存和 vcan 测试通过 |
+| M3  | CLI 扫描/状态查询、实机反馈报告 | 扫描和读取代码已完成；实机报告未完成 | 读回模式和映射，区分 p_m/xout/POS，单轴状态可靠 |
+| M4  | 多电机会话、受限运动、维护和记录 | CLI 主功能已实现；目标有效期、导入导出、记录和实机验收未完成 | 单轴受限运动/停止/断连验证通过，多电机维护结果可追溯 |
+| M5  | 插件、pluginlib 注册、单轴描述与启动配置 | 未开始 | 安装空间能加载，生命周期正确，JTC 驱动单轴并发布真实状态 |
+| M6  | 六轴配置与标定、整机故障联动 | 未开始 | 无串轴，周期与反馈满足预算，逐轴断连故障测试通过 |
+| M7  | 真实 description/MoveIt 配置和业务整改 | 未开始 | 小幅关节轨迹、点到点、笛卡尔路径与取消均有实测结果 |
+| M8  | Servo 管理、持续运行记录、性能整定 | 未开始 | 控制权切换、输入过期、温升和故障恢复达到项目指标 |
 
 
-GUI 可在 M4 后开发，因为此时已有稳定的会话接口。MIT、力矩前馈和重力补偿在 M6/M7 的位置反馈、机械参数与负载基础建立后另设里程碑，不作为 CLI 和 position 插件首版的前置条件。
+GUI 可在 M4 退出条件满足、`MotorBusSession` 公共接口稳定后开发。MIT、力矩前馈和重力补偿在 M6/M7 的位置反馈、机械参数与负载基础建立后另设里程碑，不作为 CLI 和 position 插件首版的前置条件。
 
 ### 16.3 建议任务拆分
 
 
-| 工作项    | 范围                          | 依赖              | 首要测试            |
-| ------ | --------------------------- | --------------- | --------------- |
-| DEV-01 | 核心类型、寄存器表和配置对象              | 无               | 字段/类型/范围校验      |
-| DEV-02 | 经典 CAN 编解码                  | DEV-01          | 已知报文与量化边界       |
-| DEV-03 | 传输抽象、SocketCAN 与模拟后端        | DEV-02          | 错误返回和帧元信息       |
-| DEV-04 | 多电机缓存、ID 索引、管理事务            | DEV-03          | 串轴、过期、迟到和歧义回应   |
-| DEV-05 | 所有权、运行门控、调试会话               | DEV-04          | 多进程竞争和目标有效期     |
-| DEV-06 | CLI 参数与配置工作流                | DEV-04/05       | 逐台执行报告、读回与非原子失败 |
-| DEV-07 | SystemInterface 与单轴 bringup | DEV-04/05       | 加载无动作、状态与命令接口   |
-| DEV-08 | 标定、真机配置、停止策略集成              | M0、DEV-07       | 重启位置和故障联动       |
-| DEV-09 | MoveIt 业务与真实模型接入            | DEV-08          | 真实容差、取消和到达语义    |
-| DEV-10 | Servo、GUI 与长期运行             | DEV-06/09，按功能分开 | UI 卡顿、控制权和温升    |
+| 工作项 | 范围 | 当前状态 | 依赖 | 首要测试 |
+| ----- | ---- | -------- | ---- | -------- |
+| DEV-01 | 核心类型、寄存器表和配置对象 | 已完成软件实现 | 无 | 字段/类型/范围校验 |
+| DEV-02 | 经典 CAN 编解码 | 已完成软件实现 | DEV-01 | 已知报文与量化边界 |
+| DEV-03 | 传输抽象、SocketCAN 与模拟后端 | 已完成软件实现，vcan 待执行 | DEV-02 | 错误返回和帧元信息 |
+| DEV-04 | 多电机缓存、ID 索引、管理事务 | 已完成软件实现 | DEV-03 | 串轴、过期、迟到和歧义回应 |
+| DEV-05 | 所有权、运行门控、调试会话 | 部分完成；目标有效期待实现 | DEV-04 | 多进程竞争和目标有效期 |
+| DEV-06 | CLI 参数与配置工作流 | 菜单 CLI 已完成；导入导出和记录待实现 | DEV-04/05 | 逐台执行报告、读回与非原子失败 |
+| DEV-07 | SystemInterface 与单轴 bringup | 下一开发项 | DEV-04/05 | 加载无动作、状态与命令接口 |
+| DEV-08 | 标定、真机配置、停止策略集成 | 未开始 | M0、DEV-07 | 重启位置和故障联动 |
+| DEV-09 | MoveIt 业务与真实模型接入 | 未开始 | DEV-08 | 真实容差、取消和到达语义 |
+| DEV-10 | Servo、GUI 与长期运行 | 未开始 | DEV-06/09，按功能分开 | UI 卡顿、控制权和温升 |
 
 
 不按未知工作量承诺具体工期。开发前由实际参与人数、台架可用性和关键待测行为估算，里程碑按验收证据完成而不是按文件数量完成。
@@ -1036,6 +1118,8 @@ GUI 可在 M4 后开发，因为此时已有稳定的会话接口。MIT、力矩
 编解码测试必须含独立构造的已知帧，不能只有“自己编码再自己解码”的往返测试。普通反馈内容恰好含管理操作码、迟到旧回应、同型号不同映射等应作为专门用例。
 
 首次 vcan 接口创建通常需要系统权限，只有在进入相应测试阶段时配置；本文编写不创建网络设备。模拟器只证明软件路径，不能据此宣称已验证实体电机保护和停止距离。
+
+2026-09-21 当前工作区验证记录：`damiao_core_software` 通过，覆盖 12 组协议、原生帧、所有权、注册、维护/控制、类型化配置、被动路由、事务故障、并发管理、实际位置越界、写确认丢失和歧义/断连用例；`damiao_tools_software` 通过，覆盖 11 组配置、动作序列、扫描、多轴保持、模式切换、非位置速度轴和 Flash 前置条件用例。`damiao_core_vcan` 因未提供已启用的 vcan 接口而跳过。该记录仅代表当前构建目录的软件测试结果。
 
 ### 17.2 实机测试顺序
 
