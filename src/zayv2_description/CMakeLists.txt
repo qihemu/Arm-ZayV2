@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
 
-project(ZayV2-description)
+project(zayv2_description)
 
 find_package(catkin REQUIRED)
 
