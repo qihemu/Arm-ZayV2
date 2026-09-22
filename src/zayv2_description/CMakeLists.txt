@@ -1,14 +1,16 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 
 project(zayv2_description)
 
-find_package(catkin REQUIRED)
+find_package(ament_cmake REQUIRED)
 
-catkin_package()
+# Install the robot model and ROS 2 launch resources.
+install(DIRECTORY launch meshes rviz urdf
+    DESTINATION share/${PROJECT_NAME}
+    PATTERN "__pycache__" EXCLUDE
+)
+install(FILES README.md
+    DESTINATION share/${PROJECT_NAME}
+)
 
-find_package(roslaunch)
-
-foreach(dir config launch meshes urdf)
-	install(DIRECTORY ${dir}/
-		DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/${dir})
-endforeach(dir)
+ament_package()
