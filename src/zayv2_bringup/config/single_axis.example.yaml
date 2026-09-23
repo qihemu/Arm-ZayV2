@@ -1,0 +1,21 @@
+# DEV-07 单轴台架模板；null 字段必须由设备读回和机械标定记录补齐。
+# 此文件默认禁止使能，不可直接当作真机参数使用。
+joint_name: joint1
+motor_name: motor_1
+model: null
+can_interface: null
+esc_id: null
+mst_id: null
+direction: null
+zero_offset_motor_output_rad: null
+extra_reduction: null
+min_position_rad: null
+max_position_rad: null
+max_velocity_rad_s: null
+activation_position_tolerance_rad: null
+feedback_timeout_ms: null
+management_timeout_ms: null
+management_quiet_period_ms: null
+inactive_poll_period_ms: null
+max_control_period_ms: null
+allow_enable_on_activate: false

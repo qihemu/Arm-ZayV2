@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="damiao_single_axis">
+    <xacro:arg name="config_file" default="UNSET"/>
+    <!-- 唯一的单轴配置来源由 launch 传入；mock 六轴描述不会被加载。 -->
+    <xacro:property name="axis" value="${xacro.load_yaml('$(arg config_file)')}"/>
+    <link name="base_link"/>
+    <link name="test_link"/>
+    <joint name="${axis['joint_name']}" type="revolute">
+        <parent link="base_link"/>
+        <child link="test_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="${axis['min_position_rad']}" upper="${axis['max_position_rad']}"
+               velocity="${axis['max_velocity_rad_s']}" effort="1"/>
+    </joint>
+
+    <ros2_control name="DamiaoArm" type="system">
+        <hardware>
+            <plugin>damiao_hardware/DamiaoSystemHardware</plugin>
+            <param name="motor_name">${axis['motor_name']}</param>
+            <param name="model">${axis['model']}</param>
+            <param name="can_interface">${axis['can_interface']}</param>
+            <param name="esc_id">${axis['esc_id']}</param>
+            <param name="mst_id">${axis['mst_id']}</param>
+            <param name="feedback_timeout_ms">${axis['feedback_timeout_ms']}</param>
+            <param name="management_timeout_ms">${axis['management_timeout_ms']}</param>
+            <param name="management_quiet_period_ms">${axis['management_quiet_period_ms']}</param>
+            <param name="inactive_poll_period_ms">${axis['inactive_poll_period_ms']}</param>
+            <param name="max_control_period_ms">${axis['max_control_period_ms']}</param>
+            <param name="allow_enable_on_activate">${str(axis['allow_enable_on_activate']).lower()}</param>
+        </hardware>
+        <joint name="${axis['joint_name']}">
+            <param name="motor_name">${axis['motor_name']}</param>
+            <param name="direction">${axis['direction']}</param>
+            <param name="zero_offset_motor_output_rad">${axis['zero_offset_motor_output_rad']}</param>
+            <param name="extra_reduction">${axis['extra_reduction']}</param>
+            <param name="min_position_rad">${axis['min_position_rad']}</param>
+            <param name="max_position_rad">${axis['max_position_rad']}</param>
+            <param name="max_velocity_rad_s">${axis['max_velocity_rad_s']}</param>
+            <param name="activation_position_tolerance_rad">${axis['activation_position_tolerance_rad']}</param>
+            <command_interface name="position"/>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+    </ros2_control>
+</robot>

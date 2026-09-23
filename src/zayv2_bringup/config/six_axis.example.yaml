@@ -1,0 +1,83 @@
+# 六轴真机配置模板；null 必须来自逐台设备核对与机械标定，默认禁止使能。
+# 关节顺序与模型、控制器和 DamiaoBus 注册顺序一致。
+bus:
+    can_interface: null
+    feedback_timeout_ms: null
+    management_timeout_ms: null
+    management_quiet_period_ms: null
+    inactive_poll_period_ms: null
+    max_control_period_ms: null
+    allow_enable_on_activate: false
+joints:
+    - joint_name: joint1
+      motor_name: motor_1
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null
+    - joint_name: joint2
+      motor_name: motor_2
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null
+    - joint_name: joint3
+      motor_name: motor_3
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null
+    - joint_name: joint4
+      motor_name: motor_4
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null
+    - joint_name: joint5
+      motor_name: motor_5
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null
+    - joint_name: joint6
+      motor_name: motor_6
+      model: null
+      esc_id: null
+      mst_id: null
+      direction: null
+      zero_offset_motor_output_rad: null
+      extra_reduction: null
+      min_position_rad: null
+      max_position_rad: null
+      max_velocity_rad_s: null
+      activation_position_tolerance_rad: null

@@ -1,0 +1,24 @@
+# 硬件只配置为 inactive；轨迹控制器也只加载，需人工检查后显式激活。
+controller_manager:
+    ros__parameters:
+        update_rate: 100
+        hardware_components_initial_state:
+            inactive:
+                - DamiaoArm
+        joint_state_broadcaster:
+            type: joint_state_broadcaster/JointStateBroadcaster
+        single_axis_controller:
+            type: joint_trajectory_controller/JointTrajectoryController
+
+single_axis_controller:
+    ros__parameters:
+        joints:
+            - joint1
+        command_interfaces:
+            - position
+        state_interfaces:
+            - position
+            - velocity
+        open_loop_control: false
+        state_publish_rate: 50.0
+        action_monitor_rate: 20.0

@@ -1,0 +1,29 @@
+# 六轴硬件和轨迹控制器分阶段激活；启动时不会发运动目标。
+controller_manager:
+    ros__parameters:
+        update_rate: 100
+        hardware_components_initial_state:
+            inactive:
+                - DamiaoArm
+        joint_state_broadcaster:
+            type: joint_state_broadcaster/JointStateBroadcaster
+        arm_controller:
+            type: joint_trajectory_controller/JointTrajectoryController
+
+arm_controller:
+    ros__parameters:
+        joints:
+            - joint1
+            - joint2
+            - joint3
+            - joint4
+            - joint5
+            - joint6
+        command_interfaces:
+            - position
+        state_interfaces:
+            - position
+            - velocity
+        open_loop_control: false
+        state_publish_rate: 50.0
+        action_monitor_rate: 20.0
