@@ -63,12 +63,12 @@ STM32 中间控制器、CANopen/CiA 402、自研电流环、固件升级、视�
 
 已核对的主要文件：
 
-- [硬件 xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/aubo_i5.ros2_control.xacro)：当前插件为 `mock_components/GenericSystem`。
-- [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/ros2_controllers.yaml)：100 Hz、position 命令、position/velocity 状态、`open_loop_control: true`。
+- [硬件 xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro)：当前插件为 `mock_components/GenericSystem`。
+- [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/ros2_controllers.yaml)：100 Hz、position 命令、position/velocity 状态、未显式设置 `open_loop_control`。
 - [主启动文件](/home/wlzc/qihemu_ws/Arm-ZayV2/src/arm_control/launch/arm_control.launch.py)：启动控制框架和 MoveIt，并通过固定延时启动业务节点。
-- [机器人模型](/home/wlzc/qihemu_ws/Arm-ZayV2/src/robot_ros_description/urdf/aubo_i5.urdf)：仍为 Aubo i5 模型，含 Aubo 的质量、惯量、关节限位和力矩参数。
-- [规划限位](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/joint_limits.yaml)：各轴 `has_acceleration_limits: false`。
-- [Servo 配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/servo.yaml)：输出到同一个 `arm_controller`，不能与规划执行无管理地同时发轨迹。
+- [机器人模型](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_description/urdf/zayv2_description.urdf)：已切换为 ZayV2 模型，质量、惯量和关节限位仍需实机核对。
+- [规划限位](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/joint_limits.yaml)：各轴 `has_acceleration_limits: false`。
+- [Servo 配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/servo.yaml)：输出到同一个 `arm_controller`，不能与规划执行无管理地同时发轨迹。
 
 本机已安装 `hardware_interface` 2.54.0、`joint_trajectory_controller` 2.53.1。后续实现应固定并记录实际依赖版本，不能默认其他发行版示例可直接编译或具有相同故障行为。
 
@@ -141,7 +141,7 @@ SocketCAN 允许多个 Socket 收发同一 CAN 接口的帧，因此必须由应
 
 J4310P-2EC 的额定/峰值力矩为 3.5/12.5 N·m，J4340-2EC 为 12/40 N·m。实际选型必须核算连杆自重、下游电机、末端工具、负载和动态惯性，不能用峰值力矩代替持续承载能力。
 
-准静态核算应逐关节考虑最不利姿态下的重力矩；动态核算还需考虑加减速、摩擦、传动效率和使用占空比。当前 Aubo 模型内的参数不能直接移植到达妙机械臂。
+准静态核算应逐关节考虑最不利姿态下的重力矩；动态核算还需考虑加减速、摩擦、传动效率和使用占空比。当前 ZayV2 模型的参数仍需与实体机械臂核对。
 
 每个关节需交付：轴方向、机械上下限、额外传动比、安装零位、允许速度/加速度、负载工况、温升约束和失能后的支撑方式。承重关节的抱闸、配重或支撑方式应在自由承重测试前完成验证。
 
@@ -844,7 +844,7 @@ src/
     └── launch/
 ```
 
-`damiao_tools` 通过 `damiao_motor_tool_support` 包内静态目标组织配置、扫描、会话、管理器、动作序列和输出代码，只安装 `damiao_motor_tool` 可执行文件、示例配置和说明，不安装公共头文件。后续 GUI 若需要复用，应先把会话整理为明确的公共接口。机器人真实 description/MoveIt 配置可在核对实体模型后迁移到明确的 ZayV2 包名，避免以 Aubo 名称暗示已经完成模型替换。
+`damiao_tools` 通过 `damiao_motor_tool_support` 包内静态目标组织配置、扫描、会话、管理器、动作序列和输出代码，只安装 `damiao_motor_tool` 可执行文件、示例配置和说明，不安装公共头文件。后续 GUI 若需要复用，应先把会话整理为明确的公共接口。机器人 description/MoveIt 配置已切换到 ZayV2 包；真机接入前仍需核对模型参数。
 
 代码遵循项目约定：4 空格缩进，C++ 大括号换行，关键代码块添加简明注释。新增接口需注明单位、坐标系、有效性、线程约束和失败行为。复用第三方代码时保留许可证与来源，记录参考提交版本。
 
@@ -999,7 +999,7 @@ controller_manager:
 
 | 当前项                                              | 真机要求                              |
 | ------------------------------------------------ | --------------------------------- |
-| `open_loop_control: true`                        | 改为使用真实状态的配置，并通过反馈扰动测试验证实际行为       |
+| 未显式设置 `open_loop_control`                        | 明确使用真实状态，并通过反馈扰动测试验证实际行为       |
 | 没有逐关节 trajectory/goal 位置容差                       | 按机械精度和测试结果配置；缺省零值不提供所需的位置误差限制     |
 | `goal_time: 0.0`                                 | 设置有限且合理的到达时间容差，避免无限等待             |
 | 所有轴未启用加速度限制                                      | 补齐真实上限并验证规划与执行均遵守                 |
@@ -1022,7 +1022,7 @@ Servo 使用 topic 流式轨迹，与规划使用的 action 共享同一控制�
 | `WayPointInfo` 注释是物理速度，代码当缩放系数 | 统一消息字段、单位与实现，考虑已有调用者兼容；不能静默改变语义              |
 | `blend_radius` 未用于现有路径执行       | 明确未支持或实现其语义，不给调用者虚假承诺                        |
 | 服务只返回 bool                     | 增加可区分规划失败、执行失败、取消、状态失效的结果；长任务优先考虑 action     |
-| 预设姿态来自 Aubo SRDF               | 用实机验证姿态替换；非法名字需显式拒绝                          |
+| 预设姿态来自 ZayV2 SRDF               | 用实机验证姿态替换；非法名字需显式拒绝                          |
 | 键盘空格仅清除速度输入                    | 保留操作停止功能，另实现任务取消和真实停止状态；不当作硬件急停              |
 
 

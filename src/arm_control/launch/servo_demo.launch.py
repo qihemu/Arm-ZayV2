@@ -1,5 +1,5 @@
 """
-Aubo i5 MoveIt Servo 完整演示：仿真栈 + Servo + 可选键盘遥操作。
+ZayV2 MoveIt Servo 完整演示：仿真栈 + Servo + 可选键盘遥操作。
 
 用法：
   # 终端 1：启动 Servo 栈（不含键盘）
@@ -31,17 +31,26 @@ def generate_launch_description():
         description="在同一 launch 中启动 servo_keyboard_node（需要 TTY）",
     )
 
-    moveit_config = MoveItConfigsBuilder("aubo_i5", package_name="aubo_i5_moveit_config").to_moveit_configs()
-    moveit_config_share = get_package_share_directory("aubo_i5_moveit_config")
     arm_control_share = get_package_share_directory("arm_control")
+    servo_initial_positions = os.path.join(arm_control_share, "config", "servo_initial_positions.yaml")
+
+    # 仅为 Servo 仿真加载避开腕部奇异点的初始姿态。
+    moveit_config = (
+        MoveItConfigsBuilder("zayv2_description", package_name="zayv2_moveit_config")
+        .robot_description(mappings={"initial_positions_file": servo_initial_positions})
+        .to_moveit_configs()
+    )
+    moveit_config_share = get_package_share_directory("zayv2_moveit_config")
     ros2_controllers_path = os.path.join(moveit_config_share, "config", "ros2_controllers.yaml")
     servo_keyboard_yaml = os.path.join(arm_control_share, "config", "servo_keyboard.yaml")
 
-    # 机器人模型与 TF
-    rsp_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(moveit_config_share, "launch", "rsp.launch.py")
-        )
+    # RSP 与 ros2_control 使用同一份 URDF，确保初始关节状态一致。
+    rsp_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        output="screen",
+        respawn=True,
+        parameters=[moveit_config.robot_description, {"publish_frequency": 15.0}],
     )
 
     # ros2_control 与轨迹控制器
@@ -86,7 +95,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         with_keyboard_arg,
-        rsp_launch,
+        rsp_node,
         ros2_control_node,
         spawn_controllers_launch,
         move_group_launch,

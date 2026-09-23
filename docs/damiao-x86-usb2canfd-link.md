@@ -19,8 +19,8 @@
 
 | 位置 | 实际作用与现状 |
 | --- | --- |
-| `src/aubo_i5_moveit_config/config/aubo_i5.ros2_control.xacro:9` | 使用 `mock_components/GenericSystem`，尚未连接实际电机 |
-| `src/aubo_i5_moveit_config/config/ros2_controllers.yaml` | 六关节、position 命令接口、position/velocity 状态接口；更新率 100 Hz；`open_loop_control: true` |
+| `src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro:9` | 使用 `mock_components/GenericSystem`，尚未连接实际电机 |
+| `src/zayv2_moveit_config/config/ros2_controllers.yaml` | 六关节、position 命令接口、position/velocity 状态接口；更新率 100 Hz；未显式设置 `open_loop_control` |
 | `src/arm_control/launch/arm_control.launch.py` | 启动 controller_manager、轨迹控制器、状态广播器和 MoveIt；可作为真机集成的上层入口 |
 | `docs/motor-control-routine-overview.md` | 达妙参考仓库的概览，属于设计资料，不能视为驱动已经集成 |
 | `docs/canopen-stm32-ros2-solution.md` | 自研 STM32 CANopen/CiA 402 从站方案，与现有达妙私有协议路线分开 |
@@ -136,7 +136,7 @@ flowchart TD
 - `read` 返回有时间戳的真实状态；`write` 做有限值、机械限位与变化率校验后发送。
 - 统一关节方向、零偏和传动比；先核对电机反馈是否已经是减速器输出轴单位，避免重复折算。
 - 设置指令过期、反馈过期、USB 断开和 bus-off 处理；退出策略需考虑承重关节，不能一律突然失能。
-- 将 xacro 中的 Mock 插件替换为硬件插件，并重新评估 `open_loop_control: true`，验证实际状态参与轨迹执行和误差监控。
+- 将 xacro 中的 Mock 插件替换为硬件插件，并显式配置 `open_loop_control` 的真机行为，验证实际状态参与轨迹执行和误差监控。
 
 无需先实现 CANopen，也不需要为使用 USB2CANFD 增加 STM32 中间板。
 

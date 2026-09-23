@@ -9,9 +9,10 @@ from moveit_configs_utils import MoveItConfigsBuilder
 
 
 def generate_launch_description():
-    moveit_config = MoveItConfigsBuilder("aubo_i5", package_name="aubo_i5_moveit_config").to_moveit_configs()
+    # 使用 ZayV2 的机器人模型和规划配置。
+    moveit_config = MoveItConfigsBuilder("zayv2_description", package_name="zayv2_moveit_config").to_moveit_configs()
 
-    moveit_config_share = get_package_share_directory("aubo_i5_moveit_config")
+    moveit_config_share = get_package_share_directory("zayv2_moveit_config")
     arm_control_share = get_package_share_directory("arm_control")
     arm_control_params = os.path.join(arm_control_share, "config", "arm_control.yaml")
     ros2_controllers_path = os.path.join(moveit_config_share, "config", "ros2_controllers.yaml")

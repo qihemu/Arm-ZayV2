@@ -43,6 +43,10 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>warehouse_ros_mongo</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <!-- Servo 启动文件需要节点、触发服务和 YAML 参数解析。 -->
+  <exec_depend>moveit_servo</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>zayv2_description</exec_depend>
 
 

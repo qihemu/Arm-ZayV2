@@ -457,7 +457,7 @@ UNCONFIGURED
 </hardware>
 ```
 
-位置在 [aubo_i5.ros2_control.xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/aubo_i5.ros2_control.xacro:7)。
+位置在 [zayv2_description.ros2_control.xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro:7)。
 
 真机版本应改成类似：
 
@@ -493,18 +493,18 @@ UNCONFIGURED
 
 Xacro 描述“硬件提供什么接口”，控制器 YAML 描述“哪个控制器使用这些接口”。
 
-当前 [ros2_controllers.yaml](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/ros2_controllers.yaml:1) 声明：
+当前 [ros2_controllers.yaml](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/ros2_controllers.yaml:1) 声明：
 
 ```yaml
 arm_controller:
     ros__parameters:
         joints:
-            - shoulder_joint
-            - upperArm_joint
-            - foreArm_joint
-            - wrist1_joint
-            - wrist2_joint
-            - wrist3_joint
+            - joint1
+            - joint2
+            - joint3
+            - joint4
+            - joint5
+            - joint6
 
         command_interfaces:
             - position

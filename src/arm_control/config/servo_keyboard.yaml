@@ -11,7 +11,7 @@ servo_keyboard_node:
     # 对齐官方 servo_node 笛卡尔输入话题
     twist_command_topic: "/servo_node/delta_twist_cmds"
     command_frame_id: "base_link"
-    linear_speed: 0.05       # m/s，对应 aubo_i5_moveit_config/config/servo.yaml scale.linear
+    linear_speed: 0.05       # m/s，对应 zayv2_moveit_config/config/servo.yaml scale.linear
     angular_speed: 0.3       # rad/s，对应 servo.yaml scale.rotational
     publish_rate: 20.0       # Hz
     key_timeout: 0.15        # s，松开按键后停止该轴的判定时间

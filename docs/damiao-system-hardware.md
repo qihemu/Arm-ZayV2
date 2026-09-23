@@ -35,7 +35,7 @@ flowchart TB
 
 
 
-当前 [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/ros2_controllers.yaml:4) 的更新率为 100 Hz，因此正常情况下每隔约 10 ms 执行：
+当前 [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/ros2_controllers.yaml:4) 的更新率为 100 Hz，因此正常情况下每隔约 10 ms 执行：
 
 1. `hardware.read()`：将已经收到的电机反馈更新到关节状态内存。
 2. `controller.update()`：轨迹控制器计算当前时刻的目标，写入关节命令内存；状态广播器读取状态。
@@ -337,7 +337,7 @@ pluginlib_export_plugin_description_file(
 
 **接入 ZayV2 时，主要改硬件描述和真机启动配置。**
 
-当前 [硬件描述](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/aubo_i5.ros2_control.xacro:9) 选择的是 `mock_components/GenericSystem`。真机配置需要选择新插件，例如下面这个单关节示意片段：
+当前 [硬件描述](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro:9) 选择的是 `mock_components/GenericSystem`。真机配置需要选择新插件，例如下面这个单关节示意片段：
 
 ```xml
 <ros2_control name="DamiaoArm" type="system">

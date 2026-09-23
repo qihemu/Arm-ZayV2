@@ -1,0 +1,8 @@
+# Servo 仿真初始姿态：第五关节接近 90°，同时留出 0.1 rad 的 Servo 限位余量。
+initial_positions:
+    joint1: 0
+    joint2: 0
+    joint3: 0
+    joint4: 0
+    joint5: 1.47
+    joint6: 0

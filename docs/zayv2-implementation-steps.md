@@ -14,7 +14,7 @@
 | MoveIt Servo、键盘节点 | 连续笛卡尔运动输入 | 后期接入，需要控制权和停止管理 |
 | `GenericSystem` | 模拟硬件 | **必须增加真实硬件实现** |
 
-硬件入口目前明确使用 [GenericSystem](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/aubo_i5.ros2_control.xacro:9)。相邻达妙仓库提供协议参考，但尚未接入 ZayV2；文档提到的 `can-motor-tool` 在本次检查的项目内和相邻路径中均未找到，不能计作已经交付的能力。
+硬件入口目前明确使用 [GenericSystem](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro:9)。相邻达妙仓库提供协议参考，但尚未接入 ZayV2；文档提到的 `can-motor-tool` 在本次检查的项目内和相邻路径中均未找到，不能计作已经交付的能力。
 
 建议形成下面的控制链：
 
@@ -41,7 +41,7 @@ flowchart TD
 
 | 环节 | 需要实现的内容 | 对当前项目的影响 |
 |---|---|---|
-| **真实机械模型与负载核算** | 连杆尺寸、关节轴方向、质量与惯量、碰撞模型、机械限位、TCP；核算各轴持续和峰值力矩 | 当前仍加载 Aubo i5，不能直接作为自制机械臂的真机模型 |
+| **真实机械模型与负载核算** | 连杆尺寸、关节轴方向、质量与惯量、碰撞模型、机械限位、TCP；核算各轴持续和峰值力矩 | 当前加载 ZayV2 模型，仍需核对实体参数后才能用于真机 |
 | **电气与 CAN 链路** | 电源容量、布线与终端电阻、适配器接入；逐轴确认型号、电压版本、固件、ID、模式、波特率 | 先保证通信可诊断、参数可追溯 |
 | **达妙协议库** | 命令编解码、反馈路由、寄存器查询、超时与异常帧处理、线程安全状态缓存 | 官方例程可作为起点，需要工程化 |
 | **`DamiaoSystemHardware` 插件** | 生命周期管理，导出命令与状态接口，实现 `read()`、`write()` | 补上轨迹控制器到电机之间的核心接口 |
@@ -51,9 +51,9 @@ flowchart TD
 
 其中有几个容易影响路线选择的细节。
 
-**首先，机械模型和承载能力需要先确定。** 当前 [URDF](/home/wlzc/qihemu_ws/Arm-ZayV2/src/robot_ros_description/urdf/aubo_i5.urdf:61) 包含 Aubo 的 ±2π 限位、133 N·m 力矩参数等；[MoveIt 限位配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/joint_limits.yaml:12) 中各轴还关闭了加速度限制。
+**首先，机械模型和承载能力需要先确定。** 当前 [ZayV2 URDF](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_description/urdf/zayv2_description.urdf) 已包含六轴几何与惯量；这些参数仍需与实体机械臂核对；[MoveIt 限位配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/joint_limits.yaml:12) 中各轴还关闭了加速度限制。
 
-J4310P 和 J4340 的额定力矩分别为 3.5、12 N·m，峰值分别为 12.5、40 N·m。选型要考虑整条下游连杆、末端负载和加速需求，不能按峰值力矩判断长期承载能力。目前缺少实体尺寸、质量和电机分配，尚不能确定两种电机应如何分配到六个关节。
+J4310P 和 J4340 的额定力矩分别为 3.5、12 N·m，峰值分别为 12.5、40 N·m。选型要考虑整条下游连杆、末端负载和加速需求，不能按峰值力矩判断长期承载能力。实体尺寸、质量和电机分配仍需核对，尚不能仅凭模型确认六个关节的电机选型。
 
 承重关节还需要明确失能后的支撑方式。电机过温、通信丢失等保护会退出使能，因此抱闸、配重或其他机械支撑方案应在带载测试前确定。
 
@@ -87,7 +87,7 @@ J4310P 和 J4340 的额定力矩分别为 3.5、12 N·m，峰值分别为 12.5�
 **现有代码中，需要在真机接入前调整的地方**
 
 1. **轨迹反馈与容差。**  
-   [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/aubo_i5_moveit_config/config/ros2_controllers.yaml:27) 开启了 `open_loop_control`，没有配置逐关节路径和终点位置容差。真机应使用实测状态，设置跟踪误差阈值和有限的到达时间容差，并验证实际生效。[参数说明](https://control.ros.org/humble/doc/ros2_controllers/joint_trajectory_controller/doc/parameters.html)
+   [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/ros2_controllers.yaml:27) 未显式配置 `open_loop_control`，没有配置逐关节路径和终点位置容差。真机应使用实测状态，设置跟踪误差阈值和有限的到达时间容差，并验证实际生效。[参数说明](https://control.ros.org/humble/doc/ros2_controllers/joint_trajectory_controller/doc/parameters.html)
 
 2. **状态失效后拒绝运动。**  
    [ArmController](/home/wlzc/qihemu_ws/Arm-ZayV2/src/arm_control/src/arm_controller.cpp:172) 获取当前状态失败时，会用轨迹首点构造状态继续处理。真机需要检查所有关节状态是否完整、新鲜、可信，失败时返回明确错误。

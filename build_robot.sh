@@ -127,21 +127,21 @@ while true; do
             fi
             
             # 对选中的包进行排序，确保基础包优先编译
-            # 优先级: robot_interfaces > robot_ros_description > 其他包
+            # 优先级: robot_interfaces > zayv2_description > 其他包
             PRIORITY_PACKAGES=()
             OTHER_PACKAGES=()
             
             for pkg in "${SELECTED_PACKAGES[@]}"; do
                 if [ "$pkg" = "robot_interfaces" ]; then
                     PRIORITY_PACKAGES=("robot_interfaces" "${PRIORITY_PACKAGES[@]}")
-                elif [ "$pkg" = "robot_ros_description" ]; then
-                    # robot_ros_description 排在 robot_interfaces 之后
+                elif [ "$pkg" = "zayv2_description" ]; then
+                    # zayv2_description 排在 robot_interfaces 之后
                     if [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_interfaces " ]]; then
                         # 如果已经有 robot_interfaces，插入到它后面
-                        PRIORITY_PACKAGES=("${PRIORITY_PACKAGES[@]}" "robot_ros_description")
+                        PRIORITY_PACKAGES=("${PRIORITY_PACKAGES[@]}" "zayv2_description")
                     else
                         # 否则放在最前面
-                        PRIORITY_PACKAGES=("robot_ros_description" "${PRIORITY_PACKAGES[@]}")
+                        PRIORITY_PACKAGES=("zayv2_description" "${PRIORITY_PACKAGES[@]}")
                     fi
                 else
                     OTHER_PACKAGES+=("$pkg")
@@ -243,7 +243,7 @@ while true; do
             BUILD_STATUS=0
             
             # 检查是否需要优先编译基础包
-            if [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_interfaces " ]] || [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_ros_description " ]]; then
+            if [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_interfaces " ]] || [[ " ${PRIORITY_PACKAGES[@]} " =~ " zayv2_description " ]]; then
                 echo -e "${YELLOW}步骤 1: 优先编译基础包...${NC}"
                 echo ""
                 
