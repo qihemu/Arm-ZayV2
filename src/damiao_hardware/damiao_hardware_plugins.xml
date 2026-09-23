@@ -1,0 +1,7 @@
+<library path="damiao_hardware">
+    <class name="damiao_hardware/DamiaoSystemHardware"
+           type="damiao_hardware::DamiaoSystemHardware"
+           base_class_type="hardware_interface::SystemInterface">
+        <description>One-to-six-axis Damiao SocketCAN system hardware.</description>
+    </class>
+</library>
