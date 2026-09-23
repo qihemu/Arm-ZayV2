@@ -1,7 +1,7 @@
 # Arm-ZayV2 达妙电机接入与多电机调试工具开发文档
 
-版本：0.2（实现同步基线）<br>
-更新日期：2026-09-21<br>
+版本：0.3（URDF 与 MoveIt 进度同步）<br>
+更新日期：2026-09-23<br>
 适用项目：`/home/wlzc/qihemu_ws/Arm-ZayV2`<br>
 适用环境：Linux / ROS 2 Humble / 达妙 J4310P-2EC 与 J4340-2EC 系列
 
@@ -9,7 +9,9 @@
 
 **实现进展（2026-09-21）：项目已有 MoveIt、轨迹控制器和 Mock 硬件链路；`damiao_core` 0.1.0 已实现协议、寄存器表、SocketCAN、最多六轴缓存、维护事务、类型化配置接口、所有权和发送门控，当前能力与限制见 [核心库说明](../src/damiao_core/README.md)。`damiao_tools` 0.1.0 已实现单总线多电机扫描和菜单式 CLI：扫描 ESC_ID 1～15、最多注册六轴、查询全部状态、全轴使能/失能、选中轴位置速度驱动、清错、重新扫描、RAM 控制模式切换、Flash 参数保存以及动作序列执行。工具内部实际类名为 `MotorManager`、`MotorBusSession` 和 `DiscoveredMotor`。GUI、真实 `SystemInterface` 插件、目标有效期、参数导入导出和运行记录尚未交付。核心库与工具的软件测试通过，vcan 测试因未提供接口而跳过；实体固件、停止行为和机械安全仍待验证。本文其余“设计要求”和“待实测”项不因软件编码完成而自动视为通过。**
 
-文中明确标为“当前实现”的接口、目录和命令行以 2026-09-21 源码为准；标为“拟新增”或“模板”的内容仍是后续设计。模板配置不能直接用于真机运动，硬件参数必须由实际设备读取、机械设计和实测结果补全。
+**URDF/MoveIt 进展（2026-09-23）：**旧 Aubo i5 MoveIt 包及包含 Aubo、LS65、elite 资源的旧描述包已移除；`arm_control` 主启动和 Servo 演示已切换至 `zayv2_description` / `zayv2_moveit_config`。ZayV2 六轴 URDF、STL 网格、SRDF 规划组和 Mock ros2_control 配置均已接入。模型展开和文件引用已通过软件检查，实体尺寸、惯量、限位、负载、TCP 与运动安全仍未完成实机核验。
+
+文中各模块的“当前实现”以对应段落标注的源码核对日期为准；标为“拟新增”或“模板”的内容仍是后续设计。模板配置不能直接用于真机运动，硬件参数必须由实际设备读取、机械设计和实测结果补全。
 
 ## 1. 目标、范围与设计决策
 
@@ -53,11 +55,11 @@ STM32 中间控制器、CANopen/CiA 402、自研电流环、固件升级、视�
 | 现有组件                                | 当前作用                  | 真机接入动作                |
 | ----------------------------------- | --------------------- | --------------------- |
 | `arm_driver_node` / `ArmController` | 提供位姿、预设姿态接口，调用 MoveIt | 保留上层功能，补齐状态检查、取消和结果语义 |
-| `move_group`                        | 规划和执行管理               | 换用经过核对的真实机器人模型        |
+| `move_group`                        | 已加载 ZayV2 Mock 模型并提供规划管理 | 真机使用前核对实体模型参数 |
 | `JointTrajectoryController`（JTC）    | 执行关节轨迹                | 保留，修订开环、容差和停止配置       |
 | `joint_state_broadcaster`           | 发布关节状态                | 状态来源替换为真实电机反馈         |
 | `robot_state_publisher`             | 根据关节状态与模型计算 TF        | 保留，核对真实坐标系            |
-| Servo / 键盘节点                        | 连续笛卡尔运动输入             | 后期开放，增加与规划模式的控制权互斥    |
+| Servo / 键盘节点                        | ZayV2 Mock 演示已接入 | 真机开放前增加与规划模式的控制权互斥 |
 | `GenericSystem`                     | Mock 硬件               | 保留测试入口，另增真机插件入口       |
 
 
@@ -66,18 +68,26 @@ STM32 中间控制器、CANopen/CiA 402、自研电流环、固件升级、视�
 - [硬件 xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.ros2_control.xacro)：当前插件为 `mock_components/GenericSystem`。
 - [控制器配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/ros2_controllers.yaml)：100 Hz、position 命令、position/velocity 状态、未显式设置 `open_loop_control`。
 - [主启动文件](/home/wlzc/qihemu_ws/Arm-ZayV2/src/arm_control/launch/arm_control.launch.py)：启动控制框架和 MoveIt，并通过固定延时启动业务节点。
-- [机器人模型](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_description/urdf/zayv2_description.urdf)：已切换为 ZayV2 模型，质量、惯量和关节限位仍需实机核对。
+- [机器人模型](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_description/urdf/zayv2_description.urdf)：七个连杆、六个旋转关节及 CAD 导出的质量、惯量和 STL 网格已接入；参数仍需实机核对。
 - [规划限位](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/joint_limits.yaml)：各轴 `has_acceleration_limits: false`。
 - [Servo 配置](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/servo.yaml)：输出到同一个 `arm_controller`，不能与规划执行无管理地同时发轨迹。
 
 本机已安装 `hardware_interface` 2.54.0、`joint_trajectory_controller` 2.53.1。后续实现应固定并记录实际依赖版本，不能默认其他发行版示例可直接编译或具有相同故障行为。
 
-### 2.2 关键缺口
+### 2.2 ZayV2 URDF 与 MoveIt 配置进度（2026-09-23）
+
+- **模型已接入：**[ZayV2 URDF](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_description/urdf/zayv2_description.urdf) 定义 `base_link`、`link1`～`link6` 和 `joint1`～`joint6`；七个连杆均有惯性数据、可视与碰撞 STL 网格。当前碰撞几何使用相同的 STL 网格，尚未针对规划性能和实体间隙优化。
+- **规划与控制配置已接入：**[MoveIt xacro](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.urdf.xacro) 引入上述 URDF 和六关节 `GenericSystem`；[SRDF](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/zayv2_description.srdf) 定义从 `base_link` 到 `link6` 的 `arm` 规划组及 `home`、`package` 预设姿态。主启动和 Servo 演示均使用 ZayV2 配置，Servo 末端链节为 `link6`。
+- **最近的仿真参数变更：**URDF 中 `joint5` 当前范围为 `-1.88495`～`1.88495` rad；[Servo 演示初始姿态](/home/wlzc/qihemu_ws/Arm-ZayV2/src/arm_control/config/servo_initial_positions.yaml) 将该关节设为 `1.5707` rad。普通 Mock 初始姿态仍为全零；这些数值不是实测机械限位或真机标定值。
+- **软件核对已通过：**当前 URDF/SRDF 可解析，七个连杆、六个关节及网格路径一致；MoveIt xacro 可展开为含六个 ros2_control 关节的 ZayV2 模型。这证明文件与软件配置可加载，不构成运动或动力学验收。
+- **真机验证未完成：**需实测关节轴方向、零位、机械行程、TCP、尺寸、质量和惯量，核算负载与持续/峰值力矩，确定碰撞简化模型和加速度限制。[规划限位](/home/wlzc/qihemu_ws/Arm-ZayV2/src/zayv2_moveit_config/config/joint_limits.yaml) 仍关闭六轴加速度限制；当前硬件插件仍是 Mock。
+
+### 2.3 关键缺口
 
 
-| 编号  | 缺口或成果                  | 当前状态（2026-09-21）              | 下一验收证据                  |
+| 编号  | 缺口或成果                  | 当前状态（2026-09-23）              | 下一验收证据                  |
 | --- | ----------------------- | ----------------------------- | ----------------------- |
-| G01 | 真实机械参数、负载和停止方式未确定       | 未完成                           | 六轴参数表、负载核算、失能支撑方案       |
+| G01 | 真实机械参数、负载和停止方式未确定       | CAD 导出六轴 URDF 已接入；实物参数未核验 | 六轴参数表、负载核算、失能支撑方案       |
 | G02 | 电机与主机通信尚未形成可验收链路        | 软件模拟完成，vcan 与实机未完成            | 单电机参数读取、原始帧和反馈记录        |
 | G03 | 项目级通用电机库               | `damiao_core` 0.1.0 已实现并通过软件测试 | vcan 与实体协议验证             |
 | G04 | 独立多电机调试工具              | `damiao_tools` 0.1.0 CLI 已实现      | M4 停止、断连和实机受限运动报告       |
@@ -801,11 +811,20 @@ GUI 框架后续按项目需求选定；若使用 Python 界面，可为核心�
 
 ### 13.1 当前与拟新增模块
 
-以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`。`damiao_core` 和
-`damiao_tools` 是当前实际结构；`damiao_hardware`、`zayv2_bringup` 仍是待建结构：
+以下目录均位于 `/home/wlzc/qihemu_ws/Arm-ZayV2/src/`。`zayv2_description`、`zayv2_moveit_config`、`arm_control`、`damiao_core` 和 `damiao_tools` 是当前实际结构；`damiao_hardware`、`zayv2_bringup` 仍是待建结构：
 
 ```text
 src/
+├── zayv2_description/
+│   ├── urdf/zayv2_description.urdf
+│   ├── meshes/
+│   └── launch/
+├── zayv2_moveit_config/
+│   ├── config/{zayv2_description.srdf,zayv2_description.urdf.xacro,joint_limits.yaml,ros2_controllers.yaml,servo.yaml}
+│   └── launch/
+├── arm_control/
+│   ├── config/{arm_control.yaml,servo_initial_positions.yaml,servo_keyboard.yaml}
+│   └── launch/
 ├── damiao_core/
 │   ├── CMakeLists.txt
 │   ├── cmake/damiao_coreConfig.cmake.in
@@ -1066,7 +1085,7 @@ flowchart LR
 ### 16.2 阶段交付与退出条件
 
 
-| 阶段  | 交付物 | 当前状态（2026-09-21） | 完成条件 |
+| 阶段  | 交付物 | 当前状态（2026-09-23） | 完成条件 |
 | --- | ------ | -------------------- | ------ |
 | M0  | 设备清单、台架、供电、ID 计划、停止方案 | 未完成 | 型号/电压明确，受限台架测试条件具备；带载阶段另需负载与支撑验证 |
 | M1  | 协议层、类型、寄存器表、配置校验 | 软件实现与测试已完成 | 已知帧向量、边界、非法值和类型测试通过 |
@@ -1075,8 +1094,8 @@ flowchart LR
 | M4  | 多电机会话、受限运动、维护和记录 | CLI 主功能已实现；目标有效期、导入导出、记录和实机验收未完成 | 单轴受限运动/停止/断连验证通过，多电机维护结果可追溯 |
 | M5  | 插件、pluginlib 注册、单轴描述与启动配置 | 未开始 | 安装空间能加载，生命周期正确，JTC 驱动单轴并发布真实状态 |
 | M6  | 六轴配置与标定、整机故障联动 | 未开始 | 无串轴，周期与反馈满足预算，逐轴断连故障测试通过 |
-| M7  | 真实 description/MoveIt 配置和业务整改 | 未开始 | 小幅关节轨迹、点到点、笛卡尔路径与取消均有实测结果 |
-| M8  | Servo 管理、持续运行记录、性能整定 | 未开始 | 控制权切换、输入过期、温升和故障恢复达到项目指标 |
+| M7  | 真实 description/MoveIt 配置和业务整改 | ZayV2 模型与 Mock 配置已接入；真机验证和业务整改未开始 | 小幅关节轨迹、点到点、笛卡尔路径与取消均有实测结果 |
+| M8  | Servo 管理、持续运行记录、性能整定 | ZayV2 Mock Servo 演示已接入；控制权管理和持续运行未开始 | 控制权切换、输入过期、温升和故障恢复达到项目指标 |
 
 
 GUI 可在 M4 退出条件满足、`MotorBusSession` 公共接口稳定后开发。MIT、力矩前馈和重力补偿在 M6/M7 的位置反馈、机械参数与负载基础建立后另设里程碑，不作为 CLI 和 position 插件首版的前置条件。
@@ -1094,8 +1113,8 @@ GUI 可在 M4 退出条件满足、`MotorBusSession` 公共接口稳定后开发
 | DEV-06 | CLI 参数与配置工作流 | 菜单 CLI 已完成；导入导出和记录待实现 | DEV-04/05 | 逐台执行报告、读回与非原子失败 |
 | DEV-07 | SystemInterface 与单轴 bringup | 下一开发项 | DEV-04/05 | 加载无动作、状态与命令接口 |
 | DEV-08 | 标定、真机配置、停止策略集成 | 未开始 | M0、DEV-07 | 重启位置和故障联动 |
-| DEV-09 | MoveIt 业务与真实模型接入 | 未开始 | DEV-08 | 真实容差、取消和到达语义 |
-| DEV-10 | Servo、GUI 与长期运行 | 未开始 | DEV-06/09，按功能分开 | UI 卡顿、控制权和温升 |
+| DEV-09 | MoveIt 业务与真实模型接入 | ZayV2 模型已接入 Mock；真机业务未开始 | DEV-08 | 真实容差、取消和到达语义 |
+| DEV-10 | Servo、GUI 与长期运行 | Mock Servo 演示已接入；真机管理、GUI 和长期运行未开始 | DEV-06/09，按功能分开 | UI 卡顿、控制权和温升 |
 
 
 不按未知工作量承诺具体工期。开发前由实际参与人数、台架可用性和关键待测行为估算，里程碑按验收证据完成而不是按文件数量完成。
@@ -1188,7 +1207,7 @@ GUI 可在 M4 退出条件满足、`MotorBusSession` 公共接口稳定后开发
 | 编号  | 待确认内容                    | 阻塞的阶段     | 关闭证据       |
 | --- | ------------------------ | --------- | ---------- |
 | Q01 | 六轴电机型号、电压版本与固件分配         | M3/M6     | 逐台参数清单     |
-| Q02 | 连杆尺寸、质量、负载、额外传动和承载能力     | M6/M7     | 机械模型与力矩核算  |
+| Q02 | CAD 导出尺寸/质量与实体一致性、负载、传动和承载能力 | M6/M7 | 实测参数与力矩核算 |
 | Q03 | 承重轴断电/失能后的支撑与制动          | 带载 M4 及以后 | 机械试验记录     |
 | Q04 | 适配器实际固件、接口、经典 CAN 配置     | M3        | 主机枚举与抓包记录  |
 | Q05 | POS、p_m、xout 的来源及跨圈/掉电关系 | M4/M5     | 多姿态位置对照    |
