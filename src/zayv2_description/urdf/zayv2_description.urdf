@@ -310,7 +310,7 @@
       link="link5" />
     <axis
       xyz="0 0 1" />
-    <limit lower="-1.57075" upper="1.57075" effort="10.0" velocity="3.0" />
+    <limit lower="-1.88495" upper="1.88495" effort="10.0" velocity="3.0" />
   </joint>
   <link
     name="link6">
