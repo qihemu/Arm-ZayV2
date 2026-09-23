@@ -1,9 +1,0 @@
-# Default initial positions for aubo_i5's ros2_control fake system
-
-initial_positions:
-  shoulder_joint: 0
-  upperArm_joint: 0.5233
-  foreArm_joint: 2.0943
-  wrist1_joint: 0
-  wrist2_joint: 1.5707
-  wrist3_joint: 0
