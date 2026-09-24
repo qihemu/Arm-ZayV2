@@ -427,11 +427,14 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_activate(const rclcp
         hold[index] = {motor_position(index, position_state_[index]),
             axes_[index].extra_reduction * axes_[index].max_velocity_rad_s};
     }
+    const auto hold_sent_at = damiao::SteadyClock::now();
     if (bus_->send_position_velocity_batch(hold.data(), axis_count_, results.data())
         != damiao::ErrorCode::Ok)
     {
         return fail("Initial all-axis hold batch failed.");
     }
+    last_command_sent_at_ = hold_sent_at;
+    initial_hold_pending_ = true;
     active_ = true;
     return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -449,6 +452,8 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_deactivate(const rcl
         return hardware_interface::CallbackReturn::ERROR;
     }
     active_ = false;
+    last_command_sent_at_ = {};
+    initial_hold_pending_ = false;
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
         position_command_[index] = position_state_[index];
@@ -492,6 +497,9 @@ hardware_interface::return_type DamiaoSystemHardware::read(const rclcpp::Time&, 
 {
     if (!configured_ || !bus_ || fault_)
     {
+        RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+            "Read rejected: configured=%d bus=%d fault=%d",
+            configured_, static_cast<bool>(bus_), fault_);
         return hardware_interface::return_type::ERROR;
     }
     std::array<damiao::MotorState, damiao::max_motors> states{};
@@ -514,6 +522,8 @@ hardware_interface::return_type DamiaoSystemHardware::read(const rclcpp::Time&, 
     std::array<double, damiao::max_motors> velocities{};
     if (status != damiao::ErrorCode::Ok)
     {
+        RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+            "Read failed: CAN feedback snapshot error=%d", static_cast<int>(status));
         fault_ = true;
         return hardware_interface::return_type::ERROR;
     }
@@ -523,6 +533,11 @@ hardware_interface::return_type DamiaoSystemHardware::read(const rclcpp::Time&, 
         if (states[index].raw_status != (active_ ? 1 : 0)
             || !decode_state(index, states[index], positions[index], velocities[index]))
         {
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Read failed for %s: valid=%d raw_status=%u expected=%u position=%.6f velocity=%.6f",
+                axes_[index].joint_name.c_str(), states[index].valid,
+                static_cast<unsigned>(states[index].raw_status), active_ ? 1U : 0U,
+                states[index].output_position_rad, states[index].output_velocity_rad_s);
             fault_ = true;
             return hardware_interface::return_type::ERROR;
         }
@@ -537,24 +552,36 @@ hardware_interface::return_type DamiaoSystemHardware::read(const rclcpp::Time&, 
 }
 
 hardware_interface::return_type DamiaoSystemHardware::write(const rclcpp::Time&,
-    const rclcpp::Duration& period)
+    const rclcpp::Duration&)
 {
     if (fault_)
     {
+        RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"), "Write rejected: hardware fault is latched.");
         return hardware_interface::return_type::ERROR;
     }
     if (!active_ || !bus_)
     {
         return hardware_interface::return_type::OK;
     }
-    const double seconds = period.seconds();
-    if (!std::isfinite(seconds) || seconds <= 0.0
-        || seconds > std::chrono::duration<double>(config_.max_control_period).count())
+    // 激活已发出保持目标；按实际发送间隔检查后续周期和关节速度。
+    const auto send_at = damiao::SteadyClock::now();
+    const double seconds = std::chrono::duration<double>(send_at - last_command_sent_at_).count();
+    if (last_command_sent_at_ == damiao::Deadline{} || !std::isfinite(seconds)
+        || seconds < 0.0 || seconds > std::chrono::duration<double>(config_.max_control_period).count())
     {
+        RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+            "Write failed: command interval %.3f ms exceeds %.3f ms or has no valid timestamp",
+            seconds * 1000.0, std::chrono::duration<double, std::milli>(config_.max_control_period).count());
         fault_ = true;
         bus_->end_control();
         return hardware_interface::return_type::ERROR;
     }
+    // 初始保持目标已发出；等待至少一个 100 Hz 周期，避免两组六帧挤满 can0 发送队列。
+    if (initial_hold_pending_ && send_at - last_command_sent_at_ < std::chrono::milliseconds(10))
+    {
+        return hardware_interface::return_type::OK;
+    }
+    initial_hold_pending_ = false;
     std::array<damiao::PositionVelocityCommand, damiao::max_motors> targets{};
     std::array<damiao::ErrorCode, damiao::max_motors> results{};
     // 整组目标在发出第一帧前完成有限性、关节限位和周期变化率检查。
@@ -566,6 +593,10 @@ hardware_interface::return_type DamiaoSystemHardware::write(const rclcpp::Time&,
             || command > axis.max_position_rad
             || std::abs(command - last_command_[index]) > axis.max_velocity_rad_s * seconds + 1e-9)
         {
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Write failed for %s: target=%.6f previous=%.6f interval=%.3f ms limits=[%.6f, %.6f] max_velocity=%.6f",
+                axis.joint_name.c_str(), command, last_command_[index], seconds * 1000.0,
+                axis.min_position_rad, axis.max_position_rad, axis.max_velocity_rad_s);
             fault_ = true;
             bus_->end_control();
             return hardware_interface::return_type::ERROR;
@@ -573,13 +604,24 @@ hardware_interface::return_type DamiaoSystemHardware::write(const rclcpp::Time&,
         targets[index] = {motor_position(index, command),
             axis.extra_reduction * axis.max_velocity_rad_s};
     }
-    if (bus_->send_position_velocity_batch(targets.data(), axis_count_, results.data())
-        != damiao::ErrorCode::Ok)
+    const auto sent = bus_->send_position_velocity_batch(targets.data(), axis_count_, results.data());
+    if (sent != damiao::ErrorCode::Ok)
     {
+        // 找出第一台未成功发送的电机，方便区分反馈故障与部分发送故障。
+        std::size_t failed_index = 0;
+        while (failed_index < axis_count_ && results[failed_index] == damiao::ErrorCode::Ok)
+        {
+            ++failed_index;
+        }
+        RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+            "Write failed: CAN batch error=%d first_failed_axis=%zu axis_error=%d",
+            static_cast<int>(sent), failed_index < axis_count_ ? failed_index + 1 : 0,
+            failed_index < axis_count_ ? static_cast<int>(results[failed_index]) : -1);
         fault_ = true;
         bus_->end_control();
         return hardware_interface::return_type::ERROR;
     }
+    last_command_sent_at_ = send_at;
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
         last_command_[index] = position_command_[index];
@@ -665,6 +707,8 @@ void DamiaoSystemHardware::close_bus()
     configured_ = false;
     active_ = false;
     enable_attempted_ = false;
+    last_command_sent_at_ = {};
+    initial_hold_pending_ = false;
     const double invalid = std::numeric_limits<double>::quiet_NaN();
     position_command_.fill(invalid);
     last_command_.fill(invalid);
