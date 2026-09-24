@@ -1,16 +1,5 @@
 # 示例动作序列：M 编号与菜单一致；delay 仅占用时间，不等待电机到位
-M1 pos=0.0 ve=3.0
-delay 1000
-M2 pos=0.0 ve=3.0
-delay 1000
-M3 pos=0.0 ve=3.0
-delay 1000
-M4 pos=0.0 ve=3.0
-delay 1000
-M5 pos=0.0 ve=3.0
-delay 1000
-M6 pos=0.0 ve=3.0
-delay 1000
+
 M1 pos=5.0 ve=2.0
 delay 1000
 M2 pos=5.0 ve=2.0
@@ -22,4 +11,16 @@ delay 1000
 M5 pos=5.0 ve=2.0
 delay 1000
 M6 pos=5.0 ve=2.0
+delay 1000
+M1 pos=0.0 ve=3.0
+delay 1000
+M2 pos=0.0 ve=3.0
+delay 1000
+M3 pos=0.0 ve=3.0
+delay 1000
+M4 pos=0.0 ve=3.0
+delay 1000
+M5 pos=0.0 ve=3.0
+delay 1000
+M6 pos=0.0 ve=3.0
 delay 1000
