@@ -66,8 +66,19 @@ def _start_nodes(context):
         OnProcessExit(target_action=control_node,
             on_exit=[EmitEvent(event=Shutdown(reason="controller_manager exited"))]),
     )
+    # 监视器退出表示硬件状态失效，立即结束仍可能报告成功的轨迹服务器。
+    guard_node = Node(
+        package="zayv2_bringup",
+        executable="hardware_state_guard.py",
+        output="screen",
+    )
+    shutdown_on_guard_exit = RegisterEventHandler(
+        OnProcessExit(target_action=guard_node,
+            on_exit=[EmitEvent(event=Shutdown(reason="hardware state guard exited"))]),
+    )
     return [
         shutdown_on_control_exit,
+        shutdown_on_guard_exit,
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -75,6 +86,7 @@ def _start_nodes(context):
             output="screen",
         ),
         control_node,
+        guard_node,
         Node(
             package="controller_manager",
             executable="spawner",

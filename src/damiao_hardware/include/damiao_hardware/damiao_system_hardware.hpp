@@ -85,6 +85,7 @@ private:
     std::array<damiao::Deadline, damiao::max_motors> last_state_received_{};
     // 用最近一次整组发送的时刻衡量控制间隔，避免激活事务阻塞控制循环时误判周期。
     damiao::Deadline last_command_sent_at_{};
+    damiao::Deadline last_rate_warning_at_{};
     bool initial_hold_pending_ = false;
     bool configured_ = false;
     bool active_ = false;

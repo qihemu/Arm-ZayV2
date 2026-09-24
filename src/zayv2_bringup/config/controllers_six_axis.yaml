@@ -25,5 +25,21 @@ arm_controller:
             - position
             - velocity
         open_loop_control: false
+        # 终点必须由实测反馈确认；超时或误差过大时返回 Action 失败。
+        constraints:
+            goal_time: 1.0
+            stopped_velocity_tolerance: 0.05
+            joint1:
+                goal: 0.05
+            joint2:
+                goal: 0.05
+            joint3:
+                goal: 0.05
+            joint4:
+                goal: 0.05
+            joint5:
+                goal: 0.05
+            joint6:
+                goal: 0.05
         state_publish_rate: 50.0
         action_monitor_rate: 20.0

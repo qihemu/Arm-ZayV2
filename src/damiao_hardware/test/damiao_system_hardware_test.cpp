@@ -1,4 +1,5 @@
 #include <damiao_hardware/damiao_system_hardware.hpp>
+#include <damiao_hardware/position_step_limit.hpp>
 
 #include <gtest/gtest.h>
 #include <hardware_interface/resource_manager.hpp>
@@ -57,6 +58,21 @@ hardware_interface::HardwareInfo valid_six_axis_info()
         info.joints.push_back(joint);
     }
     return info;
+}
+
+// 新轨迹替换时只允许按已发送目标和实际周期渐进靠近，反向变化同样受限。
+TEST(DamiaoHardware, LimitsReplannedCommandByActualSendInterval)
+{
+    constexpr double previous = -0.188262;
+    constexpr double requested = -0.127413;
+    constexpr double interval = 0.009968;
+    const double bounded = damiao_hardware::limit_position_step(requested, previous, 3.0, interval);
+    EXPECT_NEAR(bounded, previous + 3.0 * interval * 0.9, 1e-12);
+    EXPECT_LT(bounded, requested);
+    EXPECT_DOUBLE_EQ(damiao_hardware::limit_position_step(previous - 0.001, previous,
+        3.0, interval), previous - 0.001);
+    EXPECT_NEAR(damiao_hardware::limit_position_step(previous - 0.1, previous,
+        3.0, interval), previous - 3.0 * interval * 0.9, 1e-12);
 }
 
 TEST(DamiaoHardware, ExportsSingleAxisWithoutMovement)

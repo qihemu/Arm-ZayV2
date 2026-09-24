@@ -2,7 +2,7 @@
 # 临时诊断：在 damiao_six_axis.launch.py 已运行时使用，结果写入 logs/ 目录。
 set -eo pipefail
 
-WS_ROOT="/home/qihemu/qihemu_ws/Arm-ZayV2"
+WS_ROOT="/home/wlzc/qihemu_ws/Arm-ZayV2"
 LOG_DIR="${WS_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/ros2_control_diagnose_$(date +%Y%m%d_%H%M%S).log"

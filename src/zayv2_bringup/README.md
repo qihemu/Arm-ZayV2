@@ -28,8 +28,22 @@ ros2 control set_hardware_component_state DamiaoArm active
 ros2 control set_controller_state arm_controller active
 ```
 
+六轴启动包含独立的硬件状态监视器：`DamiaoArm` 激活后若退回非 active 状态，监视器会结束整个 launch，防止轨迹控制器继续使用旧反馈接受目标。轨迹控制器还要求六轴实测终点误差不超过 0.05 rad，并在终点后 1 秒内达到；这些阈值应按台架实测调整。硬件故障后需重新启动 launch，不能继续使用原 Action 服务。
+
 停止轨迹并确认机械支撑后，先将 `arm_controller` 设为 inactive，再将 `DamiaoArm` 设为 inactive。插件会撤销整组发送许可并逐台失能；这些操作不是急停。六轴帧在同一控制周期内由核心库批量提交，但 CAN 总线上仍逐帧发送。实机同步精度、故障联动和停止距离需要测量。
 
 ## 单轴台架入口
 
 `damiao_single_axis.launch.py` 使用独立的 `single_axis.example.yaml`，仅包含测试关节 `joint1` 和测试连杆。控制器名为 `single_axis_controller`。启动方式相同，只需将 launch 文件和配置模板换为单轴版本；该模型不代表整台机械臂几何。单轴与六轴配置均默认禁止使能。
+
+## 六轴滑块测试 GUI
+
+先按上述流程启动六轴 bringup 并手动将 `DamiaoArm`、`arm_controller` 设为 active。在另一终端运行独立测试节点，`--config-file` 必须与 bringup 使用同一份 YAML：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run zayv2_bringup damiao_slider_test_gui.py --config-file /tmp/damiao_six_axis.yaml
+```
+
+GUI 从配置读取六轴角度和速度上限，启动后从 `/arm_controller/controller_state` 读取实测角度初始化滑块；未取得完整新鲜反馈前不会发送目标。拖动可同时调整多轴，目标最多每 100 ms 合并为一条完整六轴轨迹发送到 `/arm_controller/joint_trajectory`。速度默认 0.1 rad/s，可调至配置上限；松手或关闭窗口后，控制器继续执行最后的目标。若硬件、控制器或反馈失效，界面停止发送并要求重新接收实测值后再操作。右上角“回零”按钮会将六轴目标一次性设为精确的 0 rad 并发送完整轨迹；仅在六轴零点均处于配置限位内、硬件和控制器正常且反馈新鲜时可用。此 GUI 不发布 `/joint_states`，测试时不要同时使用其他轨迹命令来源。

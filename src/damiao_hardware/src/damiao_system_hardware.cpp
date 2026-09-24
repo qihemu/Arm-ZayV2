@@ -1,4 +1,5 @@
 #include <damiao_hardware/damiao_system_hardware.hpp>
+#include <damiao_hardware/position_step_limit.hpp>
 
 #include <damiao_core/protocol.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
@@ -304,12 +305,36 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_configure(const rclc
             index, damiao::SteadyClock::now() + config_.management_timeout);
         double position = 0.0;
         double velocity = 0.0;
-        if (current.status.code != damiao::ErrorCode::Ok || !current.value
-            || current.value->raw_status != 0
-            || !decode_state(index, *current.value, position, velocity))
+        // 分开报告通信、失能状态和角度限位，便于定位启动时的单轴反馈故障。
+        if (current.status.code != damiao::ErrorCode::Ok || !current.value)
         {
             RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
-                "Initial disabled feedback invalid: %s", axes_[index].joint_name.c_str());
+                "Initial feedback query failed: %s (error=%d, detail=%s)",
+                axes_[index].joint_name.c_str(), static_cast<int>(current.status.code),
+                current.status.message.c_str());
+            close_bus();
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+        if (current.value->raw_status != 0)
+        {
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Initial motor is not disabled: %s (raw_status=%u, %s)",
+                axes_[index].joint_name.c_str(),
+                static_cast<unsigned int>(current.value->raw_status),
+                damiao::DamiaoProtocol::status_description(current.value->raw_status));
+            close_bus();
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+        if (!decode_state(index, *current.value, position, velocity))
+        {
+            const auto& axis = axes_[index];
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Initial feedback outside limits or invalid: %s "
+                "(valid=%d, motor_position=%.6f rad, motor_velocity=%.6f rad/s, "
+                "joint_position=%.6f rad, limits=[%.6f, %.6f] rad)",
+                axis.joint_name.c_str(), current.value->valid,
+                current.value->output_position_rad, current.value->output_velocity_rad_s,
+                position, axis.min_position_rad, axis.max_position_rad);
             close_bus();
             return hardware_interface::CallbackReturn::ERROR;
         }
@@ -434,6 +459,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_activate(const rclcp
         return fail("Initial all-axis hold batch failed.");
     }
     last_command_sent_at_ = hold_sent_at;
+    last_rate_warning_at_ = {};
     initial_hold_pending_ = true;
     active_ = true;
     return hardware_interface::CallbackReturn::SUCCESS;
@@ -453,6 +479,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_deactivate(const rcl
     }
     active_ = false;
     last_command_sent_at_ = {};
+    last_rate_warning_at_ = {};
     initial_hold_pending_ = false;
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
@@ -584,24 +611,30 @@ hardware_interface::return_type DamiaoSystemHardware::write(const rclcpp::Time&,
     initial_hold_pending_ = false;
     std::array<damiao::PositionVelocityCommand, damiao::max_motors> targets{};
     std::array<damiao::ErrorCode, damiao::max_motors> results{};
-    // 整组目标在发出第一帧前完成有限性、关节限位和周期变化率检查。
+    std::array<double, damiao::max_motors> bounded_commands{};
+    std::size_t first_limited_index = axis_count_;
+    // 整组目标先检查有限性和限位；速度跳变只限制本周期实际发送值。
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
         const auto& axis = axes_[index];
         const double command = position_command_[index];
         if (!std::isfinite(command) || command < axis.min_position_rad
-            || command > axis.max_position_rad
-            || std::abs(command - last_command_[index]) > axis.max_velocity_rad_s * seconds + 1e-9)
+            || command > axis.max_position_rad)
         {
             RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
-                "Write failed for %s: target=%.6f previous=%.6f interval=%.3f ms limits=[%.6f, %.6f] max_velocity=%.6f",
-                axis.joint_name.c_str(), command, last_command_[index], seconds * 1000.0,
-                axis.min_position_rad, axis.max_position_rad, axis.max_velocity_rad_s);
+                "Write failed for %s: target=%.6f limits=[%.6f, %.6f]",
+                axis.joint_name.c_str(), command, axis.min_position_rad, axis.max_position_rad);
             fault_ = true;
             bus_->end_control();
             return hardware_interface::return_type::ERROR;
         }
-        targets[index] = {motor_position(index, command),
+        bounded_commands[index] = limit_position_step(command, last_command_[index],
+            axis.max_velocity_rad_s, seconds);
+        if (bounded_commands[index] != command && first_limited_index == axis_count_)
+        {
+            first_limited_index = index;
+        }
+        targets[index] = {motor_position(index, bounded_commands[index]),
             axis.extra_reduction * axis.max_velocity_rad_s};
     }
     const auto sent = bus_->send_position_velocity_batch(targets.data(), axis_count_, results.data());
@@ -621,10 +654,22 @@ hardware_interface::return_type DamiaoSystemHardware::write(const rclcpp::Time&,
         bus_->end_control();
         return hardware_interface::return_type::ERROR;
     }
+    // 整批成功后才报告实际限幅，避免把未发送的目标记为已发送。
+    if (first_limited_index < axis_count_
+        && (last_rate_warning_at_ == damiao::Deadline{}
+            || send_at - last_rate_warning_at_ >= std::chrono::seconds(1)))
+    {
+        RCLCPP_WARN(rclcpp::get_logger("damiao_hardware"),
+            "Rate-limited %s: requested=%.6f sent=%.6f previous=%.6f interval=%.3f ms",
+            axes_[first_limited_index].joint_name.c_str(),
+            position_command_[first_limited_index], bounded_commands[first_limited_index],
+            last_command_[first_limited_index], seconds * 1000.0);
+        last_rate_warning_at_ = send_at;
+    }
     last_command_sent_at_ = send_at;
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
-        last_command_[index] = position_command_[index];
+        last_command_[index] = bounded_commands[index];
     }
     return hardware_interface::return_type::OK;
 }
@@ -708,6 +753,7 @@ void DamiaoSystemHardware::close_bus()
     active_ = false;
     enable_attempted_ = false;
     last_command_sent_at_ = {};
+    last_rate_warning_at_ = {};
     initial_hold_pending_ = false;
     const double invalid = std::numeric_limits<double>::quiet_NaN();
     position_command_.fill(invalid);
