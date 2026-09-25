@@ -70,6 +70,7 @@ private:
     void close_bus();
     bool decode_state(std::size_t index, const damiao::MotorState& state,
         double& position, double& velocity) const;
+    bool position_within_limits(std::size_t index, double position) const;
     double motor_position(std::size_t index, double joint_position) const;
 
     SystemConfig config_;

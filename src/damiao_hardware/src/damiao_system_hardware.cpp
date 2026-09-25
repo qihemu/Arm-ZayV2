@@ -305,7 +305,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_configure(const rclc
             index, damiao::SteadyClock::now() + config_.management_timeout);
         double position = 0.0;
         double velocity = 0.0;
-        // 分开报告通信、失能状态和角度限位，便于定位启动时的单轴反馈故障。
+        // 分开报告通信、失能状态和反馈有效性，避免把越界但有效的反馈当作配置失败。
         if (current.status.code != damiao::ErrorCode::Ok || !current.value)
         {
             RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
@@ -329,7 +329,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_configure(const rclc
         {
             const auto& axis = axes_[index];
             RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
-                "Initial feedback outside limits or invalid: %s "
+                "Initial feedback invalid: %s "
                 "(valid=%d, motor_position=%.6f rad, motor_velocity=%.6f rad/s, "
                 "joint_position=%.6f rad, limits=[%.6f, %.6f] rad)",
                 axis.joint_name.c_str(), current.value->valid,
@@ -337,6 +337,15 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_configure(const rclc
                 position, axis.min_position_rad, axis.max_position_rad);
             close_bus();
             return hardware_interface::CallbackReturn::ERROR;
+        }
+        // 失能期保留真实角度供诊断；越界只阻止后续激活，不让启动时的配置失败杀死进程。
+        if (!position_within_limits(index, position))
+        {
+            const auto& axis = axes_[index];
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Initial feedback outside limits; activation will be refused: %s "
+                "(joint_position=%.6f rad, limits=[%.6f, %.6f] rad)",
+                axis.joint_name.c_str(), position, axis.min_position_rad, axis.max_position_rad);
         }
         position_state_[index] = position;
         velocity_state_[index] = velocity;
@@ -388,9 +397,26 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_activate(const rclcp
         double velocity = 0.0;
         if (current.status.code != damiao::ErrorCode::Ok || !current.value
             || current.value->raw_status != 0
-            || !decode_state(index, *current.value, position, velocity))
+            || !decode_state(index, *current.value, position, velocity)
+            || !position_within_limits(index, position))
         {
-            return fail("A motor is not freshly disabled or is outside joint limits.");
+            // 使能之前的检查可以重试；恢复失能期查询并保持硬件为 inactive。
+            const auto& axis = axes_[index];
+            RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
+                "Activation precheck failed for %s: joint_position=%.6f rad, "
+                "limits=[%.6f, %.6f] rad, feedback_error=%d, raw_status=%u",
+                axis.joint_name.c_str(), position, axis.min_position_rad, axis.max_position_rad,
+                static_cast<int>(current.status.code),
+                current.value ? static_cast<unsigned>(current.value->raw_status) : 0U);
+            try
+            {
+                start_inactive_polling();
+            }
+            catch (const std::system_error& error)
+            {
+                return fail(error.what());
+            }
+            return hardware_interface::CallbackReturn::FAILURE;
         }
         before[index] = position;
         position_state_[index] = position;
@@ -410,6 +436,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_activate(const rclcp
         if (enabled.code != damiao::ErrorCode::Ok || after.status.code != damiao::ErrorCode::Ok
             || !after.value || after.value->raw_status != 1
             || !decode_state(index, *after.value, position, velocity)
+            || !position_within_limits(index, position)
             || std::abs(position - before[index]) > axes_[index].activation_position_tolerance_rad)
         {
             return fail("Enable confirmation or initial hold position check failed.");
@@ -430,6 +457,7 @@ hardware_interface::CallbackReturn DamiaoSystemHardware::on_activate(const rclcp
         if (current.status.code != damiao::ErrorCode::Ok || !current.value
             || current.value->raw_status != 1
             || !decode_state(index, *current.value, position, velocity)
+            || !position_within_limits(index, position)
             || std::abs(position - before[index]) > axes_[index].activation_position_tolerance_rad)
         {
             return fail("Post-enable all-axis feedback check failed.");
@@ -558,7 +586,8 @@ hardware_interface::return_type DamiaoSystemHardware::read(const rclcpp::Time&, 
     for (std::size_t index = 0; index < axis_count_; ++index)
     {
         if (states[index].raw_status != (active_ ? 1 : 0)
-            || !decode_state(index, states[index], positions[index], velocities[index]))
+            || !decode_state(index, states[index], positions[index], velocities[index])
+            || (active_ && !position_within_limits(index, positions[index])))
         {
             RCLCPP_ERROR(rclcpp::get_logger("damiao_hardware"),
                 "Read failed for %s: valid=%d raw_status=%u expected=%u position=%.6f velocity=%.6f",
@@ -772,8 +801,13 @@ bool DamiaoSystemHardware::decode_state(std::size_t index, const damiao::MotorSt
     position = axis.direction * (state.output_position_rad - axis.zero_offset_motor_output_rad)
         / axis.extra_reduction;
     velocity = axis.direction * state.output_velocity_rad_s / axis.extra_reduction;
-    return std::isfinite(position) && std::isfinite(velocity)
-        && position >= axis.min_position_rad && position <= axis.max_position_rad;
+    return std::isfinite(position) && std::isfinite(velocity);
+}
+
+bool DamiaoSystemHardware::position_within_limits(std::size_t index, double position) const
+{
+    const auto& axis = axes_[index];
+    return position >= axis.min_position_rad && position <= axis.max_position_rad;
 }
 
 double DamiaoSystemHardware::motor_position(std::size_t index, double joint_position) const
