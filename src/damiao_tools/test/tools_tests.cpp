@@ -105,6 +105,7 @@ struct MotorSim
     float tmax = 10.0F;
     std::uint32_t firmware = 72;
     std::vector<float> control_targets_;
+    std::size_t zero_writes = 0;
 };
 
 // 模拟多台电机的管理响应和控制反馈，测试过程中不创建 CAN Socket。
@@ -169,6 +170,10 @@ public:
                     motor->status = 0;
                     ++disable_count_;
                 }
+                else if (request.data[7] == 0xFE)
+                {
+                    ++motor->zero_writes;
+                }
             }
         }
         else if (request.length == 8)
@@ -223,6 +228,15 @@ public:
         drop_control_feedback_ = value;
     }
 
+    void set_status(std::uint16_t esc, std::uint8_t status)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (by_esc_.count(esc))
+        {
+            by_esc_.at(esc)->status = status;
+        }
+    }
+
     bool saw_target(std::uint16_t esc, double target) const
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -257,6 +271,12 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         return save_count_;
+    }
+
+    std::size_t zero_count(std::uint16_t esc) const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return by_esc_.count(esc) ? by_esc_.at(esc)->zero_writes : 0;
     }
 
 private:
@@ -678,6 +698,57 @@ void test_save_parameters_requires_disable()
     session.shutdown();
 }
 
+void test_save_zero_targets_selected_motor_and_requires_disable()
+{
+    std::vector<MotorSim> motors{{1, 0x11, 0, 2, 12.5F, 30.0F, 10.0F, 72},
+        {2, 0x12, 0, 2, 12.5F, 30.0F, 10.0F, 72}};
+    std::vector<DiscoveredMotor> discovered;
+    for (const auto& motor : motors)
+    {
+        DiscoveredMotor item;
+        item.esc_id = motor.esc_id;
+        item.mst_id = motor.mst_id;
+        item.mode = ControlMode::PositionVelocity;
+        item.pmax_rad = 12.5;
+        item.vmax_rad_s = 30.0;
+        item.tmax_nm = 10.0;
+        item.firmware_version = 72;
+        item.operable = true;
+        item.drivable = true;
+        discovered.push_back(item);
+    }
+
+    auto transport = std::make_unique<FakeTransport>(motors);
+    auto* fake = transport.get();
+    MotorBusSession session(tool_config(), discovered, std::move(transport));
+    check(session.initialize().code == ErrorCode::Ok, "zero session initializes");
+    // 仅对目标轴写零点，并验证使能期间不会发出零点命令。
+    check(session.save_zero(1).code == ErrorCode::Ok, "zero write succeeds while disabled");
+    check(fake->zero_count(1) == 0 && fake->zero_count(2) == 1,
+        "zero write targets only the selected motor");
+    check(std::abs(session.motor_info(1).output_position_rad) < 0.001,
+        "zero write refreshes selected motor position");
+    check(session.enable_all().code == ErrorCode::Ok, "zero session enables");
+    check(session.save_zero(1).code == ErrorCode::InvalidCommand,
+        "zero write rejected while enabled");
+    check(fake->zero_count(2) == 1, "enabled rejection sends no zero command");
+    check(session.disable_all().code == ErrorCode::Ok, "zero session disables");
+    session.shutdown();
+
+    // 会话未主动使能时，也必须拒绝总线上已有其他使能轴的零点写入。
+    auto enabled_transport = std::make_unique<FakeTransport>(motors);
+    auto* enabled_fake = enabled_transport.get();
+    MotorBusSession external_session(tool_config(), discovered, std::move(enabled_transport));
+    check(external_session.initialize().code == ErrorCode::Ok,
+        "external-enabled session initializes");
+    enabled_fake->set_status(1, 1);
+    check(external_session.save_zero(1).code == ErrorCode::InvalidCommand,
+        "zero write rejected when another motor is enabled");
+    check(enabled_fake->zero_count(2) == 0,
+        "other enabled motor blocks zero command transmission");
+    external_session.shutdown();
+}
+
 }  // namespace
 
 int main()
@@ -695,6 +766,7 @@ int main()
         test_set_control_mode_updates_metadata();
         test_non_pv_motor_registers_without_drive();
         test_save_parameters_requires_disable();
+        test_save_zero_targets_selected_motor_and_requires_disable();
         std::cout << "damiao_tools software tests passed\n";
         return 0;
     }

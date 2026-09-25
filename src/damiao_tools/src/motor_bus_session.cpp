@@ -275,6 +275,46 @@ damiao::Status MotorBusSession::clear_error(damiao::MotorIndex index)
     return bus_.clear_error(index, operation_deadline());
 }
 
+damiao::Status MotorBusSession::save_zero(damiao::MotorIndex index)
+{
+    if (!initialized_)
+    {
+        return invalid_session("Session is not initialized.");
+    }
+    if (index >= motors_.size())
+    {
+        return invalid_session("Unknown motor index.");
+    }
+    if (control_active_ || all_enabled_)
+    {
+        return invalid_session("Disable all motors before saving zero position.");
+    }
+    // 写零点前主动确认整条总线上的电机均已失能。
+    const auto gate = ensure_all_motors_disabled();
+    if (gate.code != damiao::ErrorCode::Ok)
+    {
+        return gate;
+    }
+    const auto result = bus_.save_zero(index, operation_deadline());
+    if (result.code != damiao::ErrorCode::Ok)
+    {
+        return result;
+    }
+    // 零点改变后刷新位置，避免显示和下次使能时沿用旧坐标。
+    const auto current = bus_.query_state(index, operation_deadline());
+    if (current.status.code != damiao::ErrorCode::Ok || !current.value)
+    {
+        return current.status;
+    }
+    motors_[index].raw_status = current.value->raw_status;
+    motors_[index].output_position_rad = current.value->output_position_rad;
+    {
+        std::lock_guard<std::mutex> lock(command_mutex_);
+        commands_[index].output_position_rad = current.value->output_position_rad;
+    }
+    return {};
+}
+
 damiao::Result<damiao::ControlMode> MotorBusSession::read_control_mode(damiao::MotorIndex index)
 {
     if (!initialized_)

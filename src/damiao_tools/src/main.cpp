@@ -104,6 +104,7 @@ void print_menu(damiao_tools::MotorManager& manager)
         << "8. 修改选中电机控制模式（须已失能）\n"
         << "9. 保存参数到 Flash（须已失能）\n"
         << "10. 执行动作序列\n"
+        << "11. 写入选中电机零点（须已失能）\n"
         << "0. 退出\n";
 }
 
@@ -464,6 +465,39 @@ int main(int argc, char** argv)
             else
             {
                 damiao_tools::print_status_error(run_result);
+            }
+            continue;
+        }
+        if (choice == 11)
+        {
+            if (manager.all_enabled() || manager.control_active())
+            {
+                std::cerr << "请先执行菜单 4 失能全部电机。\n";
+                continue;
+            }
+            // 零点写入会改变电机坐标基准，要求操作者明确确认选中轴。
+            std::cout << "将 M" << (manager.selected_list_index() + 1)
+                << " 的当前位置写为零点，原机械标定须重新核对。输入 YES 确认> "
+                << std::flush;
+            if (!std::getline(std::cin, line))
+            {
+                break;
+            }
+            if (line != "YES")
+            {
+                std::cout << "已取消零点写入。\n";
+                continue;
+            }
+            const auto result = manager.save_zero_selected();
+            if (result.code == damiao::ErrorCode::Ok)
+            {
+                std::cout << "M" << (manager.selected_list_index() + 1)
+                    << " 零点已写入；请重新核对机械标定及 zero_offset_motor_output_rad。\n";
+            }
+            else
+            {
+                damiao_tools::print_status_error(result);
+                std::cerr << "零点写入结果未确认；请读取电机状态并核对机械标定。\n";
             }
             continue;
         }

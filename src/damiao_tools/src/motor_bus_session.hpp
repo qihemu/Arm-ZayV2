@@ -31,6 +31,8 @@ public:
     damiao::Status disable_all();
     damiao::Status drive(damiao::MotorIndex index, double absolute_position_rad, double speed_rad_s);
     damiao::Status clear_error(damiao::MotorIndex index);
+    // 将选中电机当前位置写为零点；须确认全部电机已失能。
+    damiao::Status save_zero(damiao::MotorIndex index);
     // 读回 CTRL_MODE；维护态且已失能时访问总线寄存器。
     damiao::Result<damiao::ControlMode> read_control_mode(damiao::MotorIndex index);
     // 写入 CTRL_MODE 并读回确认；写前刷新全部轴失能反馈。

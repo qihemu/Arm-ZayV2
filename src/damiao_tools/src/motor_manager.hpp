@@ -43,6 +43,8 @@ public:
     damiao::Status drive_motor(std::size_t motor_one_based, double absolute_position_rad,
         double speed_rad_s);
     damiao::Status clear_error_selected();
+    // 对当前选中电机执行写零点，并保持扫描列表与会话状态一致。
+    damiao::Status save_zero_selected();
     damiao::Result<damiao::ControlMode> read_control_mode_selected();
     damiao::Status set_control_mode_selected(damiao::ControlMode mode);
     damiao::Status save_parameters_selected();

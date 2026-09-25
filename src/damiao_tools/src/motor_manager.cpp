@@ -309,6 +309,25 @@ damiao::Status MotorManager::clear_error_selected()
     return session_->clear_error(*session_index);
 }
 
+damiao::Status MotorManager::save_zero_selected()
+{
+    if (!session_)
+    {
+        return invalid_manager("Session is not initialized.");
+    }
+    const auto session_index = session_index_for_list(selected_list_index_);
+    if (!session_index)
+    {
+        return invalid_manager("Selected motor is not registered.");
+    }
+    const auto result = session_->save_zero(*session_index);
+    if (result.code == damiao::ErrorCode::Ok)
+    {
+        sync_discovered_from_session();
+    }
+    return result;
+}
+
 damiao::Result<damiao::ControlMode> MotorManager::read_control_mode_selected()
 {
     if (!session_)
