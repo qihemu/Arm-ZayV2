@@ -15,10 +15,15 @@ add_library(damiao_core SHARED
     src/socket_can_transport.cpp
     src/registers.cpp
     src/bus.cpp
+    # H55模块与原机械臂路径分开，SDK动态加载不增加厂商库构建依赖。
+    src/h55/protocol.cpp
+    src/h55/registers.cpp
+    src/h55/bus.cpp
+    src/transports/dm_usb_sdk_transport.cpp
 )
 add_library(damiao_core::damiao_core ALIAS damiao_core)
 target_compile_features(damiao_core PUBLIC cxx_std_17)
-target_link_libraries(damiao_core PRIVATE Threads::Threads)
+target_link_libraries(damiao_core PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 target_include_directories(damiao_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

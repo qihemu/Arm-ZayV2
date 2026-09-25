@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>robot_wheel_control</name>
+    <version>0.2.0</version>
+    <description>Independent H55 wheel runtime, ros2_control hardware plugin and asynchronous ROS API.</description>
+    <!-- 本地工程维护者；邮箱为待替换的占位联系方式。 -->
+    <maintainer email="g001@example.com">G001</maintainer>
+    <license>Apache-2.0</license>
+    <buildtool_depend>ament_cmake</buildtool_depend>
+    <!-- 共享core的分模块实现，不依赖机械臂ROS插件或控制节点。 -->
+    <depend>damiao_core</depend>
+    <depend>robot_interfaces</depend>
+    <depend>rclcpp</depend>
+    <depend>rclcpp_lifecycle</depend>
+    <depend>hardware_interface</depend>
+    <depend>pluginlib</depend>
+    <depend>geometry_msgs</depend>
+    <depend>sensor_msgs</depend>
+    <depend>yaml-cpp</depend>
+    <exec_depend>rclpy</exec_depend>
+    <exec_depend>python3-yaml</exec_depend>
+    <exec_depend>launch_ros</exec_depend>
+    <exec_depend>controller_manager</exec_depend>
+    <exec_depend>diff_drive_controller</exec_depend>
+    <exec_depend>joint_state_broadcaster</exec_depend>
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>

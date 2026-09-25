@@ -1,0 +1,18 @@
+# 从已失能状态开始；独占轮速来源。需显式enable并持续发送任务心跳。
+string session_id
+string request_id
+uint8 DISTANCE=1
+uint8 YAW=2
+uint8 WHEEL_ANGLE=3
+uint8 kind
+# DISTANCE: m；YAW/WHEEL_ANGLE: rad。正号为前进/左转/双轮逻辑正转。
+float64 value
+# 对应m/s或rad/s；仍受配置中的轮速上限约束。
+float64 max_speed
+float64 timeout_s
+bool enable
+---
+bool accepted
+string session_id
+string request_id
+string reason

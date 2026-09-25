@@ -1,0 +1,127 @@
+# H55 底盘唯一配置源，schema_version=1；应用配置，不是 ROS --params-file。
+# 已实现驱动与接口；编辑文件不会写入电机。真实运行仍须完成保护/SDK时效核验。
+# 2026-09-25 23:09/23:10已读回13/45、14/46；尚未独立验证断电保持。
+schema_version: 1
+robot_wheel_control:
+    namespace: /base
+    backend: direct_usb_sdk
+    operation_mode: bench  # 悬空双轮速度验证；base模式需完成几何/多圈/带载验收。
+    commissioning:
+        address_migration_verified: true  # 当前会话已逐台读回，非Flash保存验收。
+        continuous_position_verified: false
+        loaded_stop_verified: false
+        geometry_calibrated: false
+    # 冷配置：仅失能、停机、重建会话后生效；禁止运行时改变传输身份。
+    transport:
+        can_bitrate_bps: 1000000
+        frame_format: classic_standard
+        usb:
+            serial_number: "1E9C9B273A7F5444FB21A8088EC3CF27"  # 当前实测适配器。
+            channel: 0
+            sdk_library_path: ""  # 待指定通过时效验收的可维护 SDK。
+            sample_point: 0.75
+        socketcan:
+            interface: ""  # 备用后端；当前原厂固件不是 can0。
+        lock_directory: /tmp
+    # 不复用机械臂的模式2。字段开放编辑，但当前H55后端只允许模式3。
+    protocol:
+        profile: h55_velocity_v1
+        control_mode: 3
+        register_read_dlc: 8
+        # 读回匹配用，非允许运动上限；不自动改写量化寄存器。
+        expected_pmax_rad: 12.566
+        expected_vmax_rad_s: 100.0
+        expected_tmax_nm: 40.0
+        readback_relative_tolerance: 0.0001
+    # 机械臂已用ESC 1..6/MST 17..22；7..12/23..28只为第二臂预留。
+    address_policy:
+        reserved_arm_esc_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        reserved_arm_master_ids: [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+    wheels:
+        left:
+            joint_name: left_wheel_joint
+            can_id: 13  # 0x0D；速度报文0x20D。
+            master_id: 45  # 0x2D；仅反馈地址，非第二种总线。
+            direction: -1
+            extra_reduction: 1.0
+            effective_radius_m: 0.0705  # 图纸φ141±2mm的名义初值，非带载标定；geometry_calibrated仍false。
+            expected_firmware: "6920"
+            expected_sub_version: 56
+        right:
+            joint_name: right_wheel_joint
+            can_id: 14  # 0x0E；速度报文0x20E。
+            master_id: 46  # 0x2E。
+            direction: 1
+            extra_reduction: 1.0
+            effective_radius_m: 0.0705  # 同上，后续允许左右轮分别校正。
+            expected_firmware: "6920"
+            expected_sub_version: 55
+    geometry:
+        wheel_separation_m: 0.49  # 2026-09-26用户确认胎面中线距离；固定面间距0.400m不用于差速公式。
+        base_frame_id: base_link
+        odom_frame_id: odom
+    # 已实测控制率100Hz；以下超时为初始候选值，整车验收后再定。
+    timing:
+        control_rate_hz: 100
+        odom_publish_rate_hz: 50
+        status_publish_rate_hz: 10
+        command_timeout_ms: 150
+        feedback_timeout_ms: 50
+        idle_poll_rate_hz: 25  # 已失能时用FD刷新反馈，不阻塞等待每一帧。
+        idle_feedback_timeout_ms: 250  # 仅失能待机；运动仍使用50ms。
+        max_control_lateness_ms: 30
+        management_timeout_ms: 100
+        stop_confirmation_timeout_ms: 1000
+    # 保护寄存器需失能时显式写入并读回；启动只核验，不自动改ID/模式。
+    driver_protection:
+        timeout_register_raw: 4000  # 单位50us，即200ms；下午临时值，未保存。
+        min_bus_voltage_v: 22.0  # 当前24V台架供电范围，换电源后显式调整。
+        max_bus_voltage_v: 26.0
+        max_speed_rad_s: 1.0  # 下午临时试验值，非整车最终额定限值。
+        write_on_startup: false
+        save_to_flash_on_startup: false
+    limits:
+        max_wheel_speed_rad_s: 0.2  # 初始低速开发上限；负向尚未实测。
+        max_wheel_acceleration_rad_s2: 0.4
+        bench_max_travel_rad: 1.0
+        max_linear_speed_m_s: null
+        max_angular_speed_rad_s: null
+        max_linear_acceleration_m_s2: null
+        max_angular_acceleration_rad_s2: null
+        max_reported_torque_nm: 0.8  # 试验反馈监视阈值，不是扭矩控制命令。
+        max_motor_temperature_c: 45.0
+        max_driver_temperature_c: 45.0
+    position:
+        source: feedback_unwrap
+        wrap_period_rad: null  # 须验证回绕/饱和行为，不能用PMAX直接填充。
+        max_unwrap_gap_ms: 50
+    stopping:
+        # 速度量化约0.04884rad/s：还须联合位置窗口判断，当前均待标定。
+        standstill_velocity_rad_s: null
+        standstill_position_window_rad: null
+        standstill_hold_ms: 500
+        normal_stop_behavior: zero_then_disable
+        require_parking_confirmation_for_arm: true
+    execution:
+        executor_threads: 3
+        management_queue_depth: 4
+        completed_request_history_depth: 128
+        feedback_queue_depth: 128
+        command_mailbox_depth: 1  # 最新双轮事务覆盖旧值，不累积旧运动目标。
+    # 编码器相对运动闭环；米/车体转角仅在完成标定的relative模式开放。
+    relative_motion:
+        position_gain: 2.0
+        synchronization_gain: 1.0
+        wheel_position_tolerance_rad: 0.01
+        settled_velocity_rad_s: 0.08
+        settle_hold_ms: 500
+        heartbeat_timeout_ms: 500
+        stall_timeout_s: 4.0
+        progress_step_rad: 0.002
+        max_distance_m: 1.0
+        max_yaw_rad: 3.141592653589793
+        max_timeout_s: 180.0
+    activation:
+        allow_enable_on_activate: false
+        auto_reenable_after_reconnect: false
+        require_new_command_after_enable: true

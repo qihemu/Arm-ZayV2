@@ -1,0 +1,9 @@
+# 只清除条件已解除的匹配故障；不使能，不恢复历史命令。
+string session_id
+string request_id
+uint64 expected_fault_sequence
+---
+bool accepted
+string session_id
+string request_id
+string reason

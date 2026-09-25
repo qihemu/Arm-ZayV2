@@ -1,0 +1,5 @@
+# 只取本地状态快照，禁止为此服务发起CAN读参；空请求。
+---
+# false表示尚无状态快照，此时不得使用默认state判断电机停止。
+bool available
+robot_interfaces/WheelBaseState state

@@ -1,0 +1,10 @@
+# 异步管理操作的完成事件，配合服务响应的session_id/request_id关联。
+std_msgs/Header header
+string session_id
+string request_id
+uint8 SUCCEEDED=1
+uint8 FAILED=2
+uint8 CANCELLED=3
+uint8 result
+uint64 state_sequence
+string reason

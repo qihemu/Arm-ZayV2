@@ -1,0 +1,11 @@
+# 请求使能/正常停机失能，不执行阻塞CAN事务；重复request_id必须幂等。
+# session_id从GetWheelBaseState读取；过期会话拒绝，避免重连误使能。
+string session_id
+string request_id
+bool enable
+---
+# accepted只表示已入队或相同请求已存在，不表示电机已使能/停车。
+bool accepted
+string session_id
+string request_id
+string reason

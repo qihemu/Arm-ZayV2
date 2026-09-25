@@ -1,0 +1,5 @@
+<library path="h55_base_hardware">
+    <class name="robot_wheel_control/H55BaseHardware" type="robot_wheel_control::H55BaseHardware" base_class_type="hardware_interface::SystemInterface">
+        <description>Independent H55 continuous wheel velocity interface.</description>
+    </class>
+</library>

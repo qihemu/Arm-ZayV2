@@ -21,9 +21,24 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   # 添加msg文件
   "msg/WayPointInfo.msg"
 
+    # 独立底盘的状态快照和异步操作结果，不改变现有机械臂接口。
+    "msg/WheelMotorState.msg"
+    "msg/WheelBaseState.msg"
+    "msg/WheelControlEvent.msg"
+    "msg/WheelVelocityCommand.msg"
+    "msg/WheelMotionHeartbeat.msg"
+
   # 添加srv文件
   "srv/ArmMoveToPoint.srv"
   "srv/SetPresetPose.srv"
+
+    # 管理服务只提交请求或读取缓存，运动目标继续使用标准TwistStamped。
+    "srv/SetWheelBaseEnabled.srv"
+    "srv/StopWheelBase.srv"
+    "srv/ClearWheelBaseFault.srv"
+    "srv/GetWheelBaseState.srv"
+    "srv/GetWheelControlResult.srv"
+    "srv/MoveWheelBaseRelative.srv"
 
   DEPENDENCIES std_msgs action_msgs geometry_msgs builtin_interfaces
 )

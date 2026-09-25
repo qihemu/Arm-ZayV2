@@ -1,0 +1,9 @@
+# 软件停止请求：停止优先、清除旧目标、撤销运动许可；完成后不自动恢复。
+# 停止不因调用者会话过期被拒绝；返回实际会话。没有实体急停保证。
+string request_id
+bool disable_after_stop
+---
+bool accepted
+string session_id
+string request_id
+string reason
