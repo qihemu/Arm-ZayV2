@@ -6,17 +6,19 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/wlzc/qihemu_ws/Arm-ZayV2
+cd /home/qihemu/qihemu_ws/Arm-ZayV2
 colcon build --packages-up-to zayv2_bringup damiao_hardware
 source install/setup.bash
 cp src/zayv2_bringup/config/six_axis.example.yaml /tmp/damiao_six_axis.yaml
-# 按设备读回、机械标定和受限台架记录填写所有 null 字段。
-ros2 launch zayv2_bringup damiao_six_axis.launch.py config_file:=/tmp/damiao_six_axis.yaml
+# 按设备读回和机械标定记录替换模板值，并复核各轴限位。
+ros2 launch zayv2_bringup damiao_six_axis.launch.py config_file:=/home/qihemu/qihemu_ws/Arm-ZayV2/src/zayv2_bringup/config/six_axis.example.yaml
 ```
 
-六轴 YAML 是当前 bringup 的唯一电机地址、方向、零偏和限位来源。启动前检查六个关节的顺序、ID 重复及串轴冲突、有限数和期限关系，并要求关节范围不超过当前 ZayV2 URDF 模型。接口必须是已存在的 SocketCAN 网卡。模板中的 `null` 会阻止启动；本包不会设置网卡位率。
+六轴 YAML 是当前 bringup 的唯一电机地址、方向、零偏和限位来源。启动前检查六个关节的顺序、ID 重复及串轴冲突、有限数和期限关系，并要求关节范围不超过当前 ZayV2 URDF 模型。接口必须是已存在的 SocketCAN 网卡。六轴模板包含占位数值，能通过格式校验并不代表已完成实物标定；本包不会设置网卡位率。
 
 `DamiaoArm` 在 controller_manager 中明确从 **inactive** 开始；状态广播器启动，六轴 `arm_controller` 只加载为 **inactive**。配置阶段会对六台电机发送管理读请求和无运动状态查询，但不会发送位置控制帧或自动使能。`allow_enable_on_activate` 默认 `false`。
+
+若启动时某关节角度超出配置限位，`DamiaoArm` 仍停留在 **inactive**，日志会报告关节名、实测角度和限位；此时 `ros2 control set_hardware_component_state DamiaoArm active` 会失败，电机不会使能。调整关节位置进入限位后可以再次请求激活。通信失败、设备未失能或反馈无效仍按配置故障处理。
 
 在全部六轴的反馈、方向、零位、限位、设备 TIMEOUT、机械支撑及停止行为均完成台架验证后，才可在独立配置副本中明确允许使能，并按顺序执行：
 
@@ -46,4 +48,4 @@ source install/setup.bash
 ros2 run zayv2_bringup damiao_slider_test_gui.py --config-file /tmp/damiao_six_axis.yaml
 ```
 
-GUI 从配置读取六轴角度和速度上限，启动后从 `/arm_controller/controller_state` 读取实测角度初始化滑块；未取得完整新鲜反馈前不会发送目标。拖动可同时调整多轴，目标最多每 100 ms 合并为一条完整六轴轨迹发送到 `/arm_controller/joint_trajectory`。速度默认 0.1 rad/s，可调至配置上限；松手或关闭窗口后，控制器继续执行最后的目标。若硬件、控制器或反馈失效，界面停止发送并要求重新接收实测值后再操作。右上角“回零”按钮会将六轴目标一次性设为精确的 0 rad 并发送完整轨迹；仅在六轴零点均处于配置限位内、硬件和控制器正常且反馈新鲜时可用。此 GUI 不发布 `/joint_states`，测试时不要同时使用其他轨迹命令来源。
+GUI 从配置读取六轴角度和速度上限，启动后从 `/arm_controller/controller_state` 读取实测角度初始化滑块；未取得完整新鲜反馈前不会发送目标。拖动可同时调整多轴，目标最多每 100 ms 合并为一条完整六轴轨迹发送到 `/arm_controller/joint_trajectory`。速度默认 0.1 rad/s，可调至配置上限；松手或关闭窗口后，控制器继续执行最后的目标。若硬件、控制器或反馈失效，界面停止发送并要求重新接收实测值后再操作。右上角“回零”按钮会将六轴目标一次性设为精确的 0 rad 并发送完整轨迹；仅在六轴零点均处于配置限位内、硬件和控制器正常且反馈新鲜时可用。这里的“回零”是关节运动，不会向电机写入零点，也不会修改 `zero_offset_motor_output_rad`；电机零点写入功能在 `damiao_tools` 菜单 11。此 GUI 不发布 `/joint_states`，测试时不要同时使用其他轨迹命令来源。
