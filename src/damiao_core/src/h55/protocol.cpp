@@ -37,6 +37,32 @@ Result<CanFrame> encode_read(std::uint16_t esc, std::uint8_t rid)
     frame.data[3] = rid;
     return {{}, frame};
 }
+Result<CanFrame> encode_protection_write(std::uint16_t esc, std::uint8_t rid, double value)
+{
+    if ((rid != 0x09 && rid != 0x06) || !std::isfinite(value) || value <= 0 ||
+        (rid == 0x09 && (value > 20000 || std::floor(value) != value)) ||
+        (rid == 0x06 && (value > std::numeric_limits<float>::max() || static_cast<float>(value) == 0)))
+    {
+        return {{ErrorCode::InvalidCommand, "Invalid H55 volatile protection write"}, std::nullopt};
+    }
+    auto frame = encode_read(esc, rid);
+    if (!frame.value)
+    {
+        return frame;
+    }
+    frame.value->data[2] = 0x55;
+    std::uint32_t bits = static_cast<std::uint32_t>(rid == 9 ? value : 0);
+    if (rid == 6)
+    {
+        const float f = static_cast<float>(value);
+        std::memcpy(&bits, &f, 4);
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        frame.value->data[i + 4] = (bits >> (8 * i)) & 0xff;
+    }
+    return frame;
+}
 bool is_register_frame(const CanFrame &f) noexcept
 {
     return f.length == 8 && f.data[0] >= 1 && f.data[0] <= 15 && f.data[1] == 0 &&

@@ -130,7 +130,7 @@ void WheelRuntime::authorize_source()
         source_stamp_ = SteadyClock::now();
     }
 }
-bool WheelRuntime::command(const std::array<double, 2> &speed, bool controller_write)
+bool WheelRuntime::command(const std::array<double, 2> &speed, bool controller_write, const std::string &source_id)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!state_.enabled || !state_.permitted || state_.fault || state_.relative_active)
@@ -148,11 +148,30 @@ bool WheelRuntime::command(const std::array<double, 2> &speed, bool controller_w
     {
         return false;
     }
-    if (!controller_write && config_.mode != "bench")
+    if (!controller_write && config_.mode != "bench" && config_.mode != "commissioning" && config_.mode != "relative")
     {
         return false;
     }
+    if (!controller_write)
+    {
+        if (source_id.empty() || source_id.size() > 128 || (!command_owner_.empty() && source_id != command_owner_))
+        {
+            return false;
+        }
+        command_owner_ = source_id;
+    }
     target_ = speed;
+    // Apply one common scale to preserve curvature at body velocity limits.
+    if (config_.mode != "bench")
+    {
+        const double v = (speed[0] * config_.radius[0] + speed[1] * config_.radius[1]) / 2;
+        const double w = (speed[1] * config_.radius[1] - speed[0] * config_.radius[0]) / config_.separation;
+        const double ratio = std::max({1.0, std::abs(v) / config_.linear_speed, std::abs(w) / config_.angular_speed});
+        for (auto &s : target_)
+        {
+            s /= ratio;
+        }
+    }
     command_stamp_ = SteadyClock::now();
     if (!controller_write)
     {
@@ -189,6 +208,12 @@ bool WheelRuntime::submit(Operation op, const std::string &session, const std::s
         reason = "Existing request";
         return true;
     }
+    // Repeated enable must not reset an active action's cumulative travel budget.
+    if (op == Operation::Enable && (state_.enabled || state_.lifecycle == 2 || !requests_.empty() || tx_job_))
+    {
+        reason = "Already enabled or management busy; stop before a new action";
+        return false;
+    }
     if (op == Operation::Enable && (!state_.configured || state_.fault))
     {
         reason = "Not configured or fault latched: " + state_.reason;
@@ -209,7 +234,7 @@ bool WheelRuntime::submit(Operation op, const std::string &session, const std::s
             return false;
         }
         if (!std::isfinite(goal.value) || !std::isfinite(goal.max_speed) || !std::isfinite(goal.timeout_s) ||
-            goal.max_speed <= 0 || goal.timeout_s <= 0 || goal.timeout_s > config_.relative.max_timeout_s ||
+            goal.max_speed <= 0 || goal.timeout_s < 0 || (config_.relative.max_timeout_s > 0 && goal.timeout_s > config_.relative.max_timeout_s) ||
             goal.kind < 1 || goal.kind > 3 || std::abs(goal.value) < 1e-6)
         {
             reason = "Invalid relative motion value, speed or timeout";
@@ -225,7 +250,9 @@ bool WheelRuntime::submit(Operation op, const std::string &session, const std::s
         const double limit = goal.kind == 1
                                  ? config_.relative.max_distance
                                  : (goal.kind == 2 ? config_.relative.max_yaw : config_.bench_travel * 0.8);
-        if (std::abs(goal.value) > limit || (goal.kind == 3 && goal.max_speed > config_.wheel_speed))
+        if ((limit > 0 && std::abs(goal.value) > limit) || (goal.kind == 3 && goal.max_speed > config_.wheel_speed) ||
+            (goal.kind == 1 && config_.linear_speed > 0 && goal.max_speed > config_.linear_speed) ||
+            (goal.kind == 2 && config_.angular_speed > 0 && goal.max_speed > config_.angular_speed))
         {
             reason = "Relative target or wheel speed exceeds configured limit";
             return false;
@@ -419,7 +446,7 @@ Status WheelRuntime::perform(const Request &r)
             update_measurements();
             if (!trackers_[0].valid() || !trackers_[1].valid())
             {
-                if (config_.mode != "bench")
+                if (config_.mode != "bench" && config_.mode != "commissioning")
                 {
                     fault("Position continuity lost; restart/new odometry session required");
                     return {ErrorCode::StaleFeedback, "Base position continuity lost"};
@@ -439,6 +466,20 @@ Status WheelRuntime::perform(const Request &r)
                 return {ErrorCode::NotExecuted, "Enable cancelled during fresh feedback check"};
             }
         }
+        const auto preflight = snapshot();
+        if (config_.mode == "commissioning" && !config_.continuous_verified)
+        {
+            for (std::size_t i = 0; i < 2; ++i)
+            {
+                if (config_.bus.motors[i].mapping.position_rad - std::abs(preflight.motors[i].output_position_rad)
+                    <= config_.raw_position_margin)
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    state_.lifecycle = 1;
+                    return {ErrorCode::InvalidConfiguration, "Unverified raw position too near boundary; no enable"};
+                }
+            }
+        }
         const auto result = bus_->enable_pair();
         if (result.code != ErrorCode::Ok)
         {
@@ -455,6 +496,9 @@ Status WheelRuntime::perform(const Request &r)
                 state_.reason = "Enabled; waiting for a new command";
                 enabled_since_ = SteadyClock::now();
                 bench_origin_ = state_.position;
+                command_owner_.clear();
+                state_.action_travel = {};
+                state_.action_tracking = true;
                 sent_ = {};
                 return {};
             }
@@ -531,7 +575,9 @@ Status WheelRuntime::controlled_stop(bool disable)
         state_.lifecycle = 5;
     }
     // 管理任务在TX线程执行；RX仍并行。停止过程无新的非零目标来源。
-    const auto deadline = SteadyClock::now() + std::chrono::milliseconds(config_.stop_timeout_ms);
+    const double ramp_seconds = std::max(std::abs(sent_[0]), std::abs(sent_[1])) / effective_deceleration();
+    const auto deadline = SteadyClock::now() + std::chrono::duration_cast<SteadyClock::duration>(
+        std::chrono::duration<double>(ramp_seconds + config_.stop_timeout_ms / 1000.0));
     auto now = SteadyClock::now();
     while (running_ && snapshot().enabled && now < deadline)
     {
@@ -540,11 +586,15 @@ Status WheelRuntime::controlled_stop(bool disable)
             disable = true;
             break;
         }
-        for (auto &speed : sent_)
+        // Stopping still monitors feedback/torque/position and action budget each cycle.
+        update_measurements();
+        const auto guard = motion_guard(snapshot(), true);
+        if (!guard.empty())
         {
-            speed = std::clamp(0.0, speed - config_.wheel_acceleration / config_.control_hz,
-                               speed + config_.wheel_acceleration / config_.control_hz);
+            fault(guard);
+            break;
         }
+        sent_ = ramp({});
         std::array<double, 2> raw;
         for (std::size_t i = 0; i < 2; ++i)
         {
@@ -553,6 +603,7 @@ Status WheelRuntime::controlled_stop(bool disable)
         const auto sent = bus_->send_velocity_pair(raw);
         if (sent.code != ErrorCode::Ok)
         {
+            fault(sent.message);
             break;
         }
         update_measurements();
@@ -604,6 +655,124 @@ Status WheelRuntime::controlled_stop(bool disable)
                             : "Drivers disabled; physical standstill is not confirmed";
     return {ErrorCode::Ok, state_.reason};
 }
+double WheelRuntime::effective_deceleration() const
+{
+    double d = config_.wheel_deceleration;
+    if (config_.mode != "bench")
+    {
+        d = std::min({d, config_.linear_deceleration / std::max(config_.radius[0], config_.radius[1]),
+                     config_.angular_deceleration * config_.separation /
+                         (config_.radius[0] + config_.radius[1])});
+    }
+    return d;
+}
+std::array<double, 2> WheelRuntime::ramp(const std::array<double, 2> &requested) const
+{
+    auto target = requested;
+    // Every source (including relative correction) passes the same body/wheel velocity limits.
+    double scale = std::max({1.0, std::abs(target[0]) / config_.wheel_speed,
+                             std::abs(target[1]) / config_.wheel_speed});
+    if (config_.mode != "bench")
+    {
+        const double v = (target[0] * config_.radius[0] + target[1] * config_.radius[1]) / 2;
+        const double w = (target[1] * config_.radius[1] - target[0] * config_.radius[0]) / config_.separation;
+        scale = std::max({scale, std::abs(v) / config_.linear_speed, std::abs(w) / config_.angular_speed});
+    }
+    for (auto &value : target)
+    {
+        value /= scale;
+    }
+    bool reversing = false;
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        reversing = reversing || target[i] * sent_[i] < 0;
+    }
+    if (reversing)
+    {
+        target = {};
+    } // Both wheels pass zero before a direction reversal.
+    double ratio = 1;
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const double delta = std::abs(target[i] - sent_[i]);
+        const double rate = std::abs(target[i]) < std::abs(sent_[i]) ? config_.wheel_deceleration : config_.wheel_acceleration;
+        if (delta > 0)
+        {
+            ratio = std::min(ratio, rate / config_.control_hz / delta);
+        }
+    }
+    if (config_.mode != "bench")
+    {
+        const auto body = [this](const std::array<double, 2> &x)
+        {
+            return std::array<double, 2>{(x[0] * config_.radius[0] + x[1] * config_.radius[1]) / 2,
+                (x[1] * config_.radius[1] - x[0] * config_.radius[0]) / config_.separation};
+        };
+        const auto from = body(sent_), to = body(target);
+        const std::array<double, 2> acc{config_.linear_acceleration, config_.angular_acceleration};
+        const std::array<double, 2> dec{config_.linear_deceleration, config_.angular_deceleration};
+        for (std::size_t i = 0; i < 2; ++i)
+        {
+            const double delta = std::abs(to[i] - from[i]);
+            if (delta > 0)
+            {
+                ratio = std::min(ratio, (std::abs(to[i]) < std::abs(from[i]) ? dec[i] : acc[i]) / config_.control_hz / delta);
+            }
+        }
+    }
+    std::array<double, 2> next;
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        next[i] = sent_[i] + ratio * (target[i] - sent_[i]);
+    }
+    return next;
+}
+std::string WheelRuntime::motion_guard(const RuntimeState &s, bool braking) const
+{
+    const auto now = SteadyClock::now();
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const auto &m = s.motors[i];
+        if (!m.valid || now - m.received_at > config_.bus.feedback_timeout || !trackers_[i].valid())
+        {
+            return "Motion/stop feedback or position invalid";
+        }
+        if (m.raw_status != 1 || std::abs(m.reported_torque_nm) > config_.torque_limit ||
+            m.mos_temperature_c > config_.driver_temperature || m.rotor_temperature_c > config_.motor_temperature ||
+            std::abs(m.output_velocity_rad_s) > config_.bus.motors[i].maximum_speed)
+        {
+            return "Motion/stop driver guard exceeded";
+        }
+        const double speed = std::max(std::abs(sent_[i]), std::abs(s.velocity[i]));
+        const double reaction = std::max(config_.command_timeout_ms / 1000.0, config_.relative.heartbeat_ms / 1000.0)
+            + config_.lateness_ms / 1000.0 + 1 / config_.control_hz;
+        const double reserve_rad = speed * speed / (2 * effective_deceleration()) + speed * reaction;
+        if (config_.action_distance > 0)
+        {
+            if (s.action_travel[i] >= config_.action_distance)
+            {
+                return "Action travel budget exceeded";
+            }
+            if (!braking && s.action_travel[i] + reserve_rad * config_.radius[i] + config_.stop_margin >= config_.action_distance)
+            {
+                return "Action stopping reserve reached";
+            }
+        }
+        if (config_.mode == "commissioning" && !config_.continuous_verified)
+        {
+            const double room = config_.bus.motors[i].mapping.position_rad - std::abs(m.output_position_rad);
+            if (room <= config_.raw_position_margin)
+            {
+                return "Unverified raw position boundary reached";
+            }
+            if (!braking && room <= reserve_rad * config_.reduction[i] + config_.raw_position_margin)
+            {
+                return "Raw position stopping reserve reached";
+            }
+        }
+    }
+    return {};
+}
 void WheelRuntime::update_measurements()
 {
     const auto raw = bus_->snapshot();
@@ -617,6 +786,7 @@ void WheelRuntime::update_measurements()
     {
         const double previous = state_.position[i];
         const auto &m = config_.bus.motors[i];
+        const bool previously_good = trackers_[i].valid();
         const bool good = trackers_[i].update(raw[i], config_.continuous_verified ? config_.wrap_period : 0,
                                               m.maximum_speed, 2 * m.mapping.position_rad / 65535.0,
                                               config_.unwrap_gap_ms / 1000.0);
@@ -626,6 +796,10 @@ void WheelRuntime::update_measurements()
                                             : std::chrono::milliseconds(config_.idle_feedback_timeout_ms);
         const bool fresh = raw[i].valid && now - raw[i].received_at <= timeout;
         state_.position_valid = state_.position_valid && good && fresh && config_.continuous_verified;
+        if (state_.action_tracking && good && previously_good)
+        {
+            state_.action_travel[i] += std::abs(state_.position[i] - previous) * config_.radius[i];
+        }
         if (config_.radius[i] > 0)
         {
             ds += (state_.position[i] - previous) * config_.radius[i] / 2;
@@ -764,6 +938,40 @@ void WheelRuntime::transmit_loop()
             }
             if (state.enabled)
             {
+                const auto guard = motion_guard(state);
+                if (!guard.empty())
+                {
+                    if (guard == "Action stopping reserve reached" || guard == "Raw position stopping reserve reached")
+                    {
+                        if (active_relative_)
+                        {
+                            end_relative({ErrorCode::NotExecuted, guard});
+                        }
+                        else
+                        {
+                            controlled_stop(true);
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            if (!state_.fault)
+                            {
+                                state_.reason = guard + "; drivers disabled";
+                            }
+                        }
+                    }
+                    else
+                    {
+                        fault(guard);
+                    }
+                    tick = SteadyClock::now();
+                    continue;
+                }
+                // A stale upstream source revokes enable, not merely a zero target forever.
+                if (!active_relative_ && !state.command_fresh &&
+                    now - enabled_since_ > std::chrono::milliseconds(config_.command_timeout_ms))
+                {
+                    controlled_stop(true);
+                    tick = SteadyClock::now();
+                    continue;
+                }
                 if (active_relative_ && !step_relative(now))
                 {
                     tick = SteadyClock::now();
@@ -791,10 +999,9 @@ void WheelRuntime::transmit_loop()
                     fault("ROS controller write deadline missed");
                     continue;
                 }
+                sent_ = ramp(target);
                 for (std::size_t i = 0; i < 2; ++i)
                 {
-                    const double step = config_.wheel_acceleration / config_.control_hz;
-                    sent_[i] = std::clamp(target[i], sent_[i] - step, sent_[i] + step);
                     raw[i] = sent_[i] * config_.direction[i] * config_.reduction[i];
                 }
                 const auto result = bus_->send_velocity_pair(raw);

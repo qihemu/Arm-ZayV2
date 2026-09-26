@@ -1,16 +1,32 @@
 # H55 底盘唯一配置源，schema_version=1；应用配置，不是 ROS --params-file。
-# 已实现驱动与接口；编辑文件不会写入电机。真实运行仍须完成保护/SDK时效核验。
+# 修改后重启节点：失能初始化仅写TIMEOUT/MAX_SPD并读回，不保存Flash、不自动使能。
 # 2026-09-25 23:09/23:10已读回13/45、14/46；尚未独立验证断电保持。
 schema_version: 1
 robot_wheel_control:
     namespace: /base
     backend: direct_usb_sdk
-    operation_mode: bench  # 悬空双轮速度验证；base模式需完成几何/多圈/带载验收。
+    operation_mode: commissioning  # 4kg落地限程调试；不是30kg/6rad/s验收。
     commissioning:
         address_migration_verified: true  # 当前会话已逐台读回，非Flash保存验收。
         continuous_position_verified: false
         loaded_stop_verified: false
         geometry_calibrated: false
+        # 本次动作预算按左右轮累计绝对路程较大值，含停车；刷新指令不重置。
+        max_wheel_speed_rad_s: 1.0
+        max_action_distance_m: 1.0
+        stop_margin_m: 0.10
+        raw_position_margin_rad: 0.20  # 未验证回绕时距量化边界的停车余量。
+    bench:
+        max_wheel_speed_rad_s: 0.2
+    operator:
+        # CLI默认值和发送频率；实际允许值以节点配置服务为准。
+        default_wheel_speed_rad_s: 0.5
+        default_linear_speed_m_s: 0.035
+        default_angular_speed_rad_s: 0.1
+        default_duration_s: 1.0
+        max_duration_s: null  # null不设业务时长上限；调试行程预算仍有效。
+        command_publish_rate_hz: 20.0
+        management_wait_s: 10.0
     # 冷配置：仅失能、停机、重建会话后生效；禁止运行时改变传输身份。
     transport:
         can_bitrate_bps: 1000000
@@ -42,7 +58,7 @@ robot_wheel_control:
             joint_name: left_wheel_joint
             can_id: 13  # 0x0D；速度报文0x20D。
             master_id: 45  # 0x2D；仅反馈地址，非第二种总线。
-            direction: -1
+            direction: 1
             extra_reduction: 1.0
             effective_radius_m: 0.0705  # 图纸φ141±2mm的名义初值，非带载标定；geometry_calibrated仍false。
             expected_firmware: "6920"
@@ -51,7 +67,7 @@ robot_wheel_control:
             joint_name: right_wheel_joint
             can_id: 14  # 0x0E；速度报文0x20E。
             master_id: 46  # 0x2E。
-            direction: 1
+            direction: -1
             extra_reduction: 1.0
             effective_radius_m: 0.0705  # 同上，后续允许左右轮分别校正。
             expected_firmware: "6920"
@@ -67,27 +83,30 @@ robot_wheel_control:
         status_publish_rate_hz: 10
         command_timeout_ms: 150
         feedback_timeout_ms: 50
-        idle_poll_rate_hz: 25  # 已失能时用FD刷新反馈，不阻塞等待每一帧。
+        idle_poll_rate_hz: 100  # 已失能时用FD刷新反馈，不阻塞等待每一帧。
         idle_feedback_timeout_ms: 250  # 仅失能待机；运动仍使用50ms。
         max_control_lateness_ms: 30
         management_timeout_ms: 100
         stop_confirmation_timeout_ms: 1000
-    # 保护寄存器需失能时显式写入并读回；启动只核验，不自动改ID/模式。
+    # 初始化先核验身份和失能，再仅写下面两项保护；其他保护字段为主机监视。
     driver_protection:
-        timeout_register_raw: 4000  # 单位50us，即200ms；下午临时值，未保存。
+        timeout_register_raw: 4000  # 单位50us，即200ms；重启时写入核验，不保存Flash。
         min_bus_voltage_v: 22.0  # 当前24V台架供电范围，换电源后显式调整。
         max_bus_voltage_v: 26.0
-        max_speed_rad_s: 1.0  # 下午临时试验值，非整车最终额定限值。
-        write_on_startup: false
+        max_speed_rad_s: 6.0  # 写驱动MAX_SPD；不是当前调试命令速度。
+        write_on_startup: true
         save_to_flash_on_startup: false
     limits:
-        max_wheel_speed_rad_s: 0.2  # 初始低速开发上限；负向尚未实测。
-        max_wheel_acceleration_rad_s2: 0.4
+        max_wheel_speed_rad_s: 6.0  # 总命令上限；commissioning另取1.0的较小值。
+        max_wheel_acceleration_rad_s2: 1.0
+        max_wheel_deceleration_rad_s2: 2.0  # 正常制动及反向过零，非失联停车保证。
         bench_max_travel_rad: 1.0
-        max_linear_speed_m_s: null
-        max_angular_speed_rad_s: null
-        max_linear_acceleration_m_s2: null
-        max_angular_acceleration_rad_s2: null
+        max_linear_speed_m_s: 0.42
+        max_angular_speed_rad_s: 0.5
+        max_linear_acceleration_m_s2: 0.07
+        max_angular_acceleration_rad_s2: 0.2
+        max_linear_deceleration_m_s2: 0.14
+        max_angular_deceleration_rad_s2: 0.4
         max_reported_torque_nm: 0.8  # 试验反馈监视阈值，不是扭矩控制命令。
         max_motor_temperature_c: 45.0
         max_driver_temperature_c: 45.0
@@ -108,7 +127,7 @@ robot_wheel_control:
         completed_request_history_depth: 128
         feedback_queue_depth: 128
         command_mailbox_depth: 1  # 最新双轮事务覆盖旧值，不累积旧运动目标。
-    # 编码器相对运动闭环；米/车体转角仅在完成标定的relative模式开放。
+    # 编码器相对运动闭环；commissioning为受限名义几何调试，relative须正式验收。
     relative_motion:
         position_gain: 2.0
         synchronization_gain: 1.0
@@ -118,9 +137,11 @@ robot_wheel_control:
         heartbeat_timeout_ms: 500
         stall_timeout_s: 4.0
         progress_step_rad: 0.002
-        max_distance_m: 1.0
+        max_distance_m: null  # 不设业务距离上限；调试模式仍强制每动作1m。
         max_yaw_rad: 3.141592653589793
-        max_timeout_s: 180.0
+        max_timeout_s: null  # 不设业务期限上限；任务仍有计算得到的有限期限。
+        timeout_factor: 2.0
+        timeout_margin_s: 5.0
     activation:
         allow_enable_on_activate: false
         auto_reenable_after_reconnect: false

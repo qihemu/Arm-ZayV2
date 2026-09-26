@@ -9,12 +9,15 @@ int main(int argc, char **argv)
         const auto path = settings->declare_parameter<std::string>("config_file", "");
         const auto backend = settings->declare_parameter<std::string>("backend", "");
         // standalone relative不加载diff_drive_controller，避免两个控制源同时写轮速。
-        const auto mode = settings->declare_parameter<std::string>("operation_mode", "bench");
-        if (mode != "bench" && mode != "relative")
-        {
-            throw std::runtime_error("Standalone runner supports bench or relative only");
-        }
+        const auto mode = settings->declare_parameter<std::string>("operation_mode", "");
         auto config = robot_wheel_control::load_configuration(path, backend, mode);
+        if (config.mode == "base")
+        {
+            throw std::runtime_error("base requires wheel_base.launch.py controller owner");
+        }
+        std::cout << "Wheel source=" << config.source_path << " digest=" << config.digest
+                  << " mode=" << config.mode << " effective_wheel_limit=" << config.wheel_speed
+                  << " action_limit_m=" << config.action_distance << std::endl;
         auto runtime = std::make_shared<robot_wheel_control::WheelRuntime>(config);
         auto api = std::make_shared<robot_wheel_control::WheelRosApi>(runtime);
         runtime->start();

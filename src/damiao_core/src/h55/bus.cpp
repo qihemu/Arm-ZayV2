@@ -1,4 +1,5 @@
 #include <damiao_core/h55/bus.hpp>
+#include <iostream>
 #include <cmath>
 #include <stdexcept>
 #include <thread>
@@ -178,24 +179,6 @@ Status H55Bus::verify_configuration()
     }
     for (std::size_t i = 0; i < 2; ++i)
     {
-        for (const auto rid : {0x09, 0x06})
-        {
-            const auto result = read_register(i, rid);
-            if (!result.value)
-            {
-                return result.status;
-            }
-            const double value = std::visit([](auto v) { return double(v); }, *result.value);
-            const double expected =
-                rid == 9 ? config_.motors[i].timeout_raw : config_.motors[i].maximum_speed;
-            if (std::abs(value - expected) > config_.readback_tolerance * std::max(1.0, expected))
-            {
-                return {ErrorCode::InvalidConfiguration, "H55 protection mismatch; configure while disabled"};
-            }
-        }
-    }
-    for (std::size_t i = 0; i < 2; ++i)
-    {
         for (auto rid : {0x3c, 0x3d, 0x3e})
         {
             const auto r = read_register(i, rid);
@@ -208,6 +191,51 @@ Status H55Bus::verify_configuration()
                 (rid != 0x3c && (v < 0 || v > config_.max_start_temperature)))
             {
                 return {ErrorCode::InvalidConfiguration, "H55 startup voltage/temperature guard"};
+            }
+        }
+    }
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        for (const auto rid : {0x09, 0x06})
+        {
+            const auto result = read_register(i, rid);
+            if (!result.value)
+            {
+                return result.status;
+            }
+            const double before = std::visit([](auto v) { return double(v); }, *result.value);
+            const double expected =
+                rid == 9 ? config_.motors[i].timeout_raw : config_.motors[i].maximum_speed;
+            double value = before;
+            if (config_.write_protection_on_startup &&
+                std::abs(before - expected) > config_.readback_tolerance * std::max(1.0, expected))
+            {
+                // Refresh both disabled acknowledgements before each individual write.
+                const auto disabled = disable_pair();
+                if (disabled.code != ErrorCode::Ok)
+                {
+                    return disabled;
+                }
+                std::cerr << "H55 protection write wheel=" << i << " rid=" << int(rid)
+                          << " before=" << before << " requested=" << expected << std::endl;
+                const auto written = transmit(encode_protection_write(config_.motors[i].address.esc_id, rid, expected));
+                if (written.code != ErrorCode::Ok)
+                {
+                    return written;
+                }
+                const auto readback = read_register(i, rid);
+                if (!readback.value)
+                {
+                    return {readback.status.code, "Protection readback unknown wheel=" + std::to_string(i) +
+                            " rid=" + std::to_string(rid) + ": " + readback.status.message};
+                }
+                value = std::visit([](auto v) { return double(v); }, *readback.value);
+            }
+            std::cerr << "H55 protection verified-read wheel=" << i << " rid=" << int(rid)
+                      << " actual=" << value << " requested=" << expected << std::endl;
+            if (std::abs(value - expected) > config_.readback_tolerance * std::max(1.0, expected))
+            {
+                return {ErrorCode::InvalidConfiguration, "H55 protection mismatch; configure while disabled"};
             }
         }
     }

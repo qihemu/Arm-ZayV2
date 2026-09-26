@@ -1,0 +1,259 @@
+# 雷达/感知/SLAM统一配置：只需维护本文件。
+# launch通过config_file读取各模块，不要把整份文件作为ROS节点--params-file。
+# source scripts/lidar_env.bash后，修改本文件并重启对应节点即可生效。
+schema_version: 1
+
+# =============================================================================
+# 01 雷达驱动：串口、波特率、扫描模式与雷达坐标系
+# =============================================================================
+driver:
+    channel_type: serial
+    serial_port: /dev/rplidar
+    serial_baudrate: 460800
+    frame_id: laser_frame
+    inverted: false
+    flip_x_axis: false
+    angle_compensate: true
+    auto_standby: false
+    scan_mode: Standard
+    topic_name: scan_raw
+    scan_frequency: 10.0
+
+# =============================================================================
+# 02 安装外参：base_link到雷达的安装位置、姿态与标定状态
+# =============================================================================
+mount:
+    # 2026-09-26用户确认：C1居中正装，地面至扫描窗口中心0.20m。
+    # 本包约定base_link原点为底盘地面投影中心；若整车URDF采用轮轴高度，需换算z。
+    # roll/pitch=0为水平正装初值；参照物已支持粗对齐0°附近，精确yaw仍待验收。
+    # 尚未完成精确外参验收，launch暂拒绝发布这份TF。
+    calibrated: false
+    xyz_m: [0.0, 0.0, 0.20]
+    rpy_rad: [0.0, 0.0, 0.0]
+
+# =============================================================================
+# 03 感知处理：扫描时效、底盘外廓与障碍物距离分级
+# =============================================================================
+perception:
+    base_frame: base_link
+    sensor_frame: laser_frame
+    scan_timeout_s: 0.35
+    future_tolerance_s: 0.02
+    min_valid_points: 20
+    min_span_rad: 6.0
+    # 2026-09-26用户报告底盘长0.40m、宽0.53m，雷达居中正装。
+    # 用户确认包含轮子/辅助轮/支架最外缘，双臂未安装；yaw仍待验证。
+    geometry_calibrated: false
+    footprint_bounds: [-0.20, 0.20, -0.265, 0.265]  # xmin,xmax,ymin,ymax，m
+    # 感知分区示例，尚未按负载制动距离标定，不是安全停车保证。
+    stop_margin_m: 0.20
+    caution_margin_m: 0.50
+
+# =============================================================================
+# 04 文件存储：数据根目录与点云快照时效
+# =============================================================================
+storage:
+    # 节点展开~；launch的data_root或LIDAR_SLAM_DATA_ROOT可显式覆盖。
+    data_root: ~/.local/share/arm_zay/lidar_slam
+    snapshot_timeout_s: 0.35
+
+# =============================================================================
+# 05 SLAM建图与扫描图定位：分辨率、匹配及TF参数
+# =============================================================================
+slam:
+    # 绑定Humble参数语义；供mapping和posegraph localization共同使用。
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /lidar/scan
+    mode: mapping
+    use_map_saver: true
+    resolution: 0.05
+    max_laser_range: 12.0
+    min_laser_range: 0.15
+    throttle_scans: 1
+    transform_publish_period: 0.02
+    map_update_interval: 2.0
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    minimum_time_interval: 0.1
+    minimum_travel_distance: 0.10
+    minimum_travel_heading: 0.10
+    use_scan_matching: true
+    use_scan_barycenter: true
+    do_loop_closing: true
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: false
+
+# =============================================================================
+# 06 AMCL定位：栅格地图匹配与粒子滤波参数
+# =============================================================================
+amcl:
+    global_frame_id: map
+    odom_frame_id: odom
+    base_frame_id: base_link
+    scan_topic: /lidar/scan
+    robot_model_type: nav2_amcl::DifferentialMotionModel
+    laser_model_type: likelihood_field
+    laser_min_range: 0.15
+    laser_max_range: 12.0
+    min_particles: 500
+    max_particles: 2000
+    max_beams: 60
+    update_min_d: 0.10
+    update_min_a: 0.10
+    transform_tolerance: 0.2
+    tf_broadcast: true
+    set_initial_pose: false
+    # 这些是调试起点，必须用真实里程计/地图/场景重新评估。
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.2
+
+# =============================================================================
+# 07 数据录制：rosbag2订阅QoS，使用config_export导出
+# =============================================================================
+record_qos:
+    # 确保bag接收可靠或BestEffort雷达，并保留静态TF的晚加入语义。
+    /lidar/scan_raw:
+        reliability: best_effort
+        history: keep_last
+        depth: 20
+    /tf_static:
+        reliability: reliable
+        durability: transient_local
+        history: keep_last
+        depth: 100
+
+# =============================================================================
+# 08 地图来源：导入地图时保存的设备、标定与楼层上下文模板
+# =============================================================================
+map_context:
+    # 仅作元数据模板，未填写的信息不等于已确认。
+    robot_id: pending
+    lidar_model: RPLIDAR_C1
+    lidar_serial: pending
+    lidar_firmware: pending
+    ros_distribution: humble
+    slam_toolbox_version: pending
+    source_bag: pending
+    calibration_revision: pending
+    footprint_revision: pending
+    reported_chassis_length_m: 0.40
+    reported_chassis_width_m: 0.53
+    reported_lidar_height_m: 0.20
+    lidar_height_datum: ground_to_scan_window_center
+    lidar_yaw_relative_to_front: pending
+    arms_installed: false
+    chassis_envelope_includes_protrusions: true
+    arm_envelope_verified: false
+    wheel_radius_m: 0.0705   # 手册名义值，待带载标定
+    wheel_separation_m: 0.49 # 用户确认胎面中线轮距
+    map_origin_convention: pending
+    floor_height_m: null
+    field_acceptance: pending
+
+# =============================================================================
+# 09 后续Nav2：感知参数片段，使用nav2_export生成完整外廓
+# =============================================================================
+nav2:
+    # Humble感知侧参数片段：由未来Nav2包合并，不能作为完整导航启动配置。
+    # footprint和停车区由nav2_export按lidar_perception.yaml生成，避免尺寸副本漂移。
+    local_costmap:
+        local_costmap:
+            ros__parameters:
+                global_frame: odom
+                robot_base_frame: base_link
+                rolling_window: true
+                width: 4
+                height: 4
+                resolution: 0.05
+                update_frequency: 10.0
+                publish_frequency: 5.0
+                transform_tolerance: 0.2
+                footprint_padding: 0.02
+                plugins: [obstacle_layer, inflation_layer]
+                obstacle_layer:
+                    plugin: nav2_costmap_2d::ObstacleLayer
+                    observation_sources: scan
+                    scan:
+                        topic: /lidar/scan
+                        data_type: LaserScan
+                        marking: true
+                        clearing: true
+                        inf_is_valid: false
+                        obstacle_min_range: 0.15
+                        obstacle_max_range: 8.0
+                        raytrace_min_range: 0.15
+                        raytrace_max_range: 10.0
+                        expected_update_rate: 0.35
+                        observation_persistence: 0.0
+                        min_obstacle_height: 0.0
+                        max_obstacle_height: 2.0
+                inflation_layer:
+                    plugin: nav2_costmap_2d::InflationLayer
+                    inflation_radius: 0.55
+                    cost_scaling_factor: 3.0
+    global_costmap:
+        global_costmap:
+            ros__parameters:
+                global_frame: map
+                robot_base_frame: base_link
+                resolution: 0.05
+                track_unknown_space: true
+                footprint_padding: 0.02
+                plugins: [static_layer, inflation_layer]
+                static_layer:
+                    plugin: nav2_costmap_2d::StaticLayer
+                    map_topic: /map
+                    map_subscribe_transient_local: true
+                inflation_layer:
+                    plugin: nav2_costmap_2d::InflationLayer
+                    inflation_radius: 0.55
+                    cost_scaling_factor: 3.0
+    collision_monitor:
+        ros__parameters:
+            base_frame_id: base_link
+            odom_frame_id: odom
+            cmd_vel_in_topic: /navigation/cmd_vel_smoothed
+            cmd_vel_out_topic: /navigation/cmd_vel_checked
+            transform_tolerance: 0.2
+            source_timeout: 0.35
+            base_shift_correction: true
+            stop_pub_timeout: 1.0
+            polygons: [StopZone]
+            StopZone:
+                type: polygon
+                action_type: stop
+                # Humble语义是点数>max_points，0表示至少一个点。
+                max_points: 0
+                visualize: true
+                polygon_pub_topic: /navigation/stop_zone
+                enabled: true
+            observation_sources: [scan]
+            scan:
+                type: scan
+                topic: /lidar/scan
+                enabled: true
+    # 其余规划器、控制器、行为树与速度限制由未来导航包提供。
+    controller_server:
+        ros__parameters:
+            odom_topic: /base/wheel_odom
+    bt_navigator:
+        ros__parameters:
+            global_frame: map
+            robot_base_frame: base_link
+            odom_topic: /base/wheel_odom
+    velocity_smoother:
+        ros__parameters:
+            odom_topic: /base/wheel_odom

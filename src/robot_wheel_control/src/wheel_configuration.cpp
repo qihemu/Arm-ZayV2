@@ -76,7 +76,7 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     auto c = root["robot_wheel_control"];
     keys(c, {"namespace", "backend", "operation_mode", "commissioning", "transport", "protocol",
              "address_policy", "wheels", "geometry", "timing", "driver_protection", "limits", "position",
-             "stopping", "execution", "activation", "relative_motion"});
+             "stopping", "execution", "activation", "relative_motion", "operator", "bench"});
     Configuration o;
     o.backend = backend.empty() ? c["backend"].as<std::string>() : backend;
     o.mode = mode.empty() ? c["operation_mode"].as<std::string>() : mode;
@@ -84,8 +84,8 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     require(o.name_space == "/base", "Current ROS contract uses namespace /base");
     require(o.backend == "direct_usb_sdk" || o.backend == "socketcan",
             "Unsupported backend (MCU not implemented)");
-    require(o.mode == "bench" || o.mode == "base" || o.mode == "relative",
-            "operation_mode must be bench, base or relative");
+    require(o.mode == "bench" || o.mode == "base" || o.mode == "relative" || o.mode == "commissioning",
+            "operation_mode must be bench, commissioning, base or relative");
     auto p = c["protocol"];
     keys(p, {"profile", "control_mode", "register_read_dlc", "expected_pmax_rad", "expected_vmax_rad_s",
              "expected_tmax_nm", "readback_relative_tolerance"});
@@ -120,7 +120,7 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     }
     auto flags = c["commissioning"];
     keys(flags, {"address_migration_verified", "continuous_position_verified", "loaded_stop_verified",
-                 "geometry_calibrated"});
+                 "geometry_calibrated", "max_wheel_speed_rad_s", "max_action_distance_m", "stop_margin_m", "raw_position_margin_rad"});
     o.continuous_verified = flags["continuous_position_verified"].as<bool>();
     require(flags["address_migration_verified"].as<bool>(),
             "Migrate/verify wheel addresses before real launch");
@@ -144,8 +144,8 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     auto protection = c["driver_protection"];
     keys(protection, {"timeout_register_raw", "max_speed_rad_s", "min_bus_voltage_v", "max_bus_voltage_v",
                       "write_on_startup", "save_to_flash_on_startup"});
-    require(!protection["write_on_startup"].as<bool>() && !protection["save_to_flash_on_startup"].as<bool>(),
-            "Startup register/Flash writes not supported");
+    require(!protection["save_to_flash_on_startup"].as<bool>(), "Automatic Flash saves are forbidden");
+    o.bus.write_protection_on_startup = protection["write_on_startup"].as<bool>();
     const int timeout = integer(protection, "timeout_register_raw", 1, 20000);
     o.bus.min_bus_voltage = number(protection, "min_bus_voltage_v");
     o.bus.max_bus_voltage = number(protection, "max_bus_voltage_v");
@@ -219,22 +219,57 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     require(o.command_timeout_ms < timeout * 0.05 && o.bus.feedback_timeout.count() < timeout * 0.05,
             "Host timeouts must precede driver TIMEOUT");
     auto l = c["limits"];
-    keys(l, {"max_wheel_speed_rad_s", "max_wheel_acceleration_rad_s2", "bench_max_travel_rad",
+    keys(l, {"max_wheel_speed_rad_s", "max_wheel_acceleration_rad_s2", "max_wheel_deceleration_rad_s2", "bench_max_travel_rad",
              "max_linear_speed_m_s", "max_angular_speed_rad_s", "max_linear_acceleration_m_s2",
-             "max_angular_acceleration_rad_s2", "max_reported_torque_nm", "max_motor_temperature_c",
+             "max_angular_acceleration_rad_s2", "max_linear_deceleration_m_s2", "max_angular_deceleration_rad_s2", "max_reported_torque_nm", "max_motor_temperature_c",
              "max_driver_temperature_c"});
     o.wheel_speed = number(l, "max_wheel_speed_rad_s");
     o.wheel_acceleration = number(l, "max_wheel_acceleration_rad_s2");
+    o.wheel_deceleration = number(l, "max_wheel_deceleration_rad_s2");
     o.bench_travel = number(l, "bench_max_travel_rad");
     for (std::size_t k = 0; k < 2; ++k)
     {
         require(o.wheel_speed * o.reduction[k] <= o.bus.motors[k].maximum_speed,
                 "Software wheel limit exceeds driver limit");
     }
+    keys(c["bench"], {"max_wheel_speed_rad_s"});
     if (o.mode == "bench")
     {
-        require(o.wheel_speed <= 0.2 && o.bench_travel <= 2, "Bench is limited to 0.2rad/s and 2rad travel");
+        o.wheel_speed = std::min(o.wheel_speed, number(c["bench"], "max_wheel_speed_rad_s"));
     }
+    o.raw_position_margin = number(flags, "raw_position_margin_rad");
+    if (o.mode == "commissioning")
+    {
+        o.wheel_speed = std::min(o.wheel_speed, number(flags, "max_wheel_speed_rad_s"));
+        o.action_distance = number(flags, "max_action_distance_m");
+        o.stop_margin = number(flags, "stop_margin_m");
+        require(o.stop_margin < o.action_distance && o.radius[0] > 0 && o.radius[1] > 0 && o.separation > 0,
+                "Commissioning needs nominal geometry and a positive usable action budget");
+    }
+    o.linear_speed = number(l, "max_linear_speed_m_s", true);
+    o.angular_speed = number(l, "max_angular_speed_rad_s", true);
+    o.linear_acceleration = number(l, "max_linear_acceleration_m_s2", true);
+    o.linear_deceleration = number(l, "max_linear_deceleration_m_s2", true);
+    o.angular_acceleration = number(l, "max_angular_acceleration_rad_s2", true);
+    o.angular_deceleration = number(l, "max_angular_deceleration_rad_s2", true);
+    if (o.mode != "bench")
+    {
+        require(o.linear_speed > 0 && o.angular_speed > 0 && o.linear_acceleration > 0 &&
+                    o.linear_deceleration > 0 && o.angular_acceleration > 0 && o.angular_deceleration > 0,
+                "Ground modes need all body velocity/acceleration/deceleration limits");
+    }
+    auto op = c["operator"];
+    keys(op, {"default_wheel_speed_rad_s", "default_linear_speed_m_s", "default_angular_speed_rad_s",
+              "default_duration_s", "max_duration_s", "command_publish_rate_hz", "management_wait_s"});
+    o.default_speed = number(op, "default_wheel_speed_rad_s");
+    o.default_linear = number(op, "default_linear_speed_m_s");
+    o.default_angular = number(op, "default_angular_speed_rad_s");
+    o.default_duration = number(op, "default_duration_s");
+    o.max_duration = number(op, "max_duration_s", true);
+    o.command_hz = number(op, "command_publish_rate_hz");
+    o.management_wait = number(op, "management_wait_s");
+    require(o.command_hz <= o.control_hz && 2000.0 / o.command_hz < o.command_timeout_ms &&
+                (!o.max_duration || o.default_duration <= o.max_duration), "Invalid operator timing");
     o.torque_limit = number(l, "max_reported_torque_nm");
     o.driver_temperature = number(l, "max_driver_temperature_c");
     o.motor_temperature = number(l, "max_motor_temperature_c");
@@ -275,7 +310,7 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     auto relative = c["relative_motion"];
     keys(relative, {"position_gain", "synchronization_gain", "wheel_position_tolerance_rad",
                     "settled_velocity_rad_s", "settle_hold_ms", "heartbeat_timeout_ms", "stall_timeout_s",
-                    "progress_step_rad", "max_distance_m", "max_yaw_rad", "max_timeout_s"});
+                    "progress_step_rad", "max_distance_m", "max_yaw_rad", "max_timeout_s", "timeout_factor", "timeout_margin_s"});
     o.relative.position_gain = number(relative, "position_gain");
     o.relative.sync_gain = number(relative, "synchronization_gain");
     o.relative.wheel_tolerance = number(relative, "wheel_position_tolerance_rad");
@@ -284,14 +319,21 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     o.relative.heartbeat_ms = integer(relative, "heartbeat_timeout_ms", 100, 1000);
     o.relative.stall_timeout_s = number(relative, "stall_timeout_s");
     o.relative.progress_step = number(relative, "progress_step_rad");
-    o.relative.max_distance = number(relative, "max_distance_m");
+    o.relative.max_distance = number(relative, "max_distance_m", true);
     o.relative.max_yaw = number(relative, "max_yaw_rad");
-    o.relative.max_timeout_s = number(relative, "max_timeout_s");
-    require(o.relative.position_gain <= 10 && o.relative.sync_gain <= 5 &&
-                o.relative.wheel_tolerance <= 0.05 && o.relative.settled_speed <= 0.1 &&
-                o.relative.progress_step < o.relative.wheel_tolerance && o.relative.stall_timeout_s <= 10 &&
-                o.relative.max_timeout_s <= 300 && o.relative.max_timeout_s > o.relative.stall_timeout_s &&
-                o.relative.max_distance <= 5 && o.relative.max_yaw <= 6.283185307179586,
+    o.relative.max_timeout_s = number(relative, "max_timeout_s", true);
+    o.relative.timeout_factor = number(relative, "timeout_factor");
+    o.relative.timeout_margin = number(relative, "timeout_margin_s");
+    require(2000.0 / o.command_hz < o.relative.heartbeat_ms,
+            "Operator rate cannot maintain relative heartbeat");
+    for (const auto &motor : o.bus.motors)
+    {
+        require(o.raw_position_margin < motor.mapping.position_rad &&
+                    motor.maximum_speed <= motor.mapping.velocity_rad_s,
+                "Protection velocity or raw position margin exceeds feedback mapping");
+    }
+    require(o.relative.progress_step < o.relative.wheel_tolerance && o.relative.timeout_factor >= 1 &&
+                (!o.relative.max_timeout_s || o.relative.max_timeout_s > o.relative.stall_timeout_s),
             "Invalid relative motion limits");
     if (o.mode == "base" || o.mode == "relative")
     {
@@ -324,6 +366,13 @@ Configuration load_configuration(const std::string &path, const std::string &bac
     std::ostringstream digest;
     digest << std::hex << hash;
     o.digest = digest.str();
+    o.source_path = path;
+    // Return the effective profile limit, not an inactive higher global setting.
+    auto effective = YAML::Clone(root);
+    effective["robot_wheel_control"]["operation_mode"] = o.mode;
+    effective["robot_wheel_control"]["backend"] = o.backend;
+    effective["robot_wheel_control"]["limits"]["max_wheel_speed_rad_s"] = o.wheel_speed;
+    o.yaml = YAML::Dump(effective);
     return o;
 }
 } // namespace robot_wheel_control

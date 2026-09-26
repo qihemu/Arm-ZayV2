@@ -5,17 +5,21 @@ import time
 import uuid
 import math
 import signal
+import yaml
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
 from robot_interfaces.msg import WheelVelocityCommand, WheelMotionHeartbeat
 from robot_interfaces.srv import GetWheelBaseState, GetWheelControlResult, SetWheelBaseEnabled, StopWheelBase, ClearWheelBaseFault
-from robot_interfaces.srv import MoveWheelBaseRelative
+from robot_interfaces.srv import MoveWheelBaseRelative, GetWheelConfiguration
 
 
 class Client(Node):
     def __init__(self):
         super().__init__('wheel_operator')
+        self.configuration_client = self.create_client(GetWheelConfiguration, '/base/get_configuration')
+        self.config = None
+        self.config_session = None
         self.state_client = self.create_client(GetWheelBaseState, '/base/get_state')
         self.result_client = self.create_client(GetWheelControlResult, '/base/get_control_result')
         self.enable_client = self.create_client(SetWheelBaseEnabled, '/base/set_enabled')
@@ -35,6 +39,13 @@ class Client(Node):
             raise RuntimeError('Service response timeout')
         return future.result()
 
+    def configuration(self):
+        response = self.call(self.configuration_client, GetWheelConfiguration.Request())
+        self.config = yaml.safe_load(response.configuration_yaml)['robot_wheel_control']
+        self.config_session = response.session_id
+        print(f'configuration={response.configuration_digest}, source={response.source_path}', flush=True)
+        return response
+
     def state(self):
         response = self.call(self.state_client, GetWheelBaseState.Request())
         if not response.available:
@@ -44,7 +55,7 @@ class Client(Node):
     def wait_result(self, response):
         if not response.accepted:
             raise RuntimeError(response.reason)
-        deadline = time.monotonic() + 6
+        deadline = time.monotonic() + self.config['operator']['management_wait_s']
         request = GetWheelControlResult.Request(session_id=response.session_id, request_id=response.request_id)
         while time.monotonic() < deadline:
             result = self.call(self.result_client, request)
@@ -75,7 +86,7 @@ class Client(Node):
         def refresh():
             heartbeat.header.stamp = self.get_clock().now().to_msg()
             self.heartbeat_publisher.publish(heartbeat)
-        timer = self.create_timer(0.05, refresh)
+        timer = self.create_timer(1 / self.config['operator']['command_publish_rate_hz'], refresh)
         accepted = False
         uncertain = True
         try:
@@ -86,7 +97,8 @@ class Client(Node):
             accepted = True
             print('Relative task accepted: ' + request.request_id, flush=True)
             query = GetWheelControlResult.Request(session_id=state.session_id, request_id=request.request_id)
-            deadline = time.monotonic() + timeout + 10
+            # Server computes a finite deadline for timeout=0; never impose a second distance cap.
+            deadline = time.monotonic() + timeout + self.config['operator']['management_wait_s'] if timeout else math.inf
             next_print = 0
             while time.monotonic() < deadline:
                 result = self.call(self.result_client, query)
@@ -99,6 +111,8 @@ class Client(Node):
                     raise RuntimeError(result.reason)
                 if time.monotonic() >= next_print:
                     s = self.state()
+                    if not timeout and s.relative_timeout_s > 0 and math.isinf(deadline):
+                        deadline = time.monotonic() + s.relative_timeout_s + self.config['operator']['management_wait_s']
                     if s.session_id != state.session_id:
                         raise RuntimeError('Session changed during relative task')
                     print(f'target={s.relative_target:.5f}, measured={s.relative_measured:.5f}, '
@@ -113,81 +127,132 @@ class Client(Node):
                 self.stop()
 
 
+def positive(value, name):
+    if value is None or not math.isfinite(value) or value <= 0:
+        raise RuntimeError(name + ' must be finite and positive')
+    return value
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['status', 'enable', 'stop', 'clear', 'forward', 'backward', 'left', 'right', 'move', 'turn', 'wheel-angle'])
-    parser.add_argument('--speed', type=float, default=0.1, help='logical wheel rad/s, >0 and <=0.2')
-    parser.add_argument('--duration', type=float, default=1.0, help='bounded motion seconds, >0 and <=3')
-    parser.add_argument('--linear-speed', type=float, default=0.005, help='base mode linear m/s, (0,0.01]')
-    parser.add_argument('--angular-speed', type=float, default=0.02, help='base mode yaw rad/s, (0,0.05]')
-    parser.add_argument('--enable', action='store_true', help='explicitly request enable before this motion')
-    parser.add_argument('--distance', type=float, help='move: signed relative distance in metres')
-    parser.add_argument('--angle', type=float, help='turn: signed chassis degrees; wheel-angle: signed logical wheel degrees')
-    parser.add_argument('--timeout', type=float, default=120.0, help='relative motion deadline seconds (not commanded travel duration)')
+    parser = argparse.ArgumentParser(description='H55 commands use the running node YAML configuration')
+    parser.add_argument('command', choices=['status', 'configuration', 'enable', 'stop', 'clear',
+                        'forward', 'backward', 'left', 'right', 'move', 'turn', 'wheel-angle'])
+    parser.add_argument('--speed', type=float, help='wheel rad/s; limit from running node')
+    duration = parser.add_mutually_exclusive_group()
+    duration.add_argument('--duration', type=float, help='seconds; default/limit from YAML')
+    duration.add_argument('--continuous', action='store_true', help='until stop, interruption or action guard')
+    parser.add_argument('--linear-speed', type=float, help='body m/s')
+    parser.add_argument('--angular-speed', type=float, help='body rad/s')
+    parser.add_argument('--enable', action='store_true')
+    parser.add_argument('--distance', type=float, help='signed metres')
+    parser.add_argument('--angle', type=float, help='signed degrees')
+    parser.add_argument('--timeout', type=float, help='relative deadline seconds; omitted = server computes')
     args = parser.parse_args()
-    if not 0 < args.speed <= 0.2 or not 0 < args.duration <= 3:
-        parser.error('speed must be (0,0.2], duration (0,3]')
-    if not 0 < args.linear_speed <= 0.01 or not 0 < args.angular_speed <= 0.05:
-        parser.error('bounded base CLI allows linear <=0.01m/s, angular <=0.05rad/s')
-    if args.command in ('move', 'turn', 'wheel-angle'):
-        value = args.distance if args.command == 'move' else args.angle
-        if value is None or not math.isfinite(value) or value == 0 or not args.enable:
-            parser.error('relative motion requires nonzero --distance/--angle and explicit --enable')
-        if not math.isfinite(args.timeout) or not 0 < args.timeout <= 300:
-            parser.error('relative --timeout must be (0,300] seconds')
     rclpy.init()
-    # Ctrl+C先抛出KeyboardInterrupt，让finally可在ROS上下文仍有效时请求停车。
     signal.signal(signal.SIGINT, signal.default_int_handler)
     client = Client()
     try:
-        if args.command in ('move', 'turn', 'wheel-angle'):
-            kind = {'move': 1, 'turn': 2, 'wheel-angle': 3}[args.command]
-            value = args.distance if kind == 1 else math.radians(args.angle)
-            speed = args.linear_speed if kind == 1 else (args.angular_speed if kind == 2 else args.speed)
-            client.move_relative(kind, value, speed, args.timeout, args.enable)
-        elif args.command == 'status':
+        response = client.configuration()
+        c, op = client.config, client.config['operator']
+        if args.command == 'configuration':
+            print(response.configuration_yaml)
+            return
+        if args.command == 'status':
             print(client.state())
-        elif args.command == 'enable':
-            client.enable()
-        elif args.command == 'stop':
+            return
+        if args.command == 'stop':
             client.stop()
-        elif args.command == 'clear':
+            return
+        if args.command == 'clear':
             state = client.state()
-            request = ClearWheelBaseFault.Request(session_id=state.session_id, request_id=str(uuid.uuid4()), expected_fault_sequence=state.fault_sequence)
+            request = ClearWheelBaseFault.Request(session_id=state.session_id, request_id=str(uuid.uuid4()),
+                                                 expected_fault_sequence=state.fault_sequence)
             print(client.wait_result(client.call(client.clear_client, request)))
+            return
+        if args.command == 'enable':
+            client.enable()
+            return
+        if client.state().session_id != response.session_id:
+            raise RuntimeError('Session changed; reload configuration')
+        speed = positive(args.speed if args.speed is not None else min(op['default_wheel_speed_rad_s'],
+                         c['limits']['max_wheel_speed_rad_s']), 'wheel speed')
+        linear = positive(args.linear_speed if args.linear_speed is not None else op['default_linear_speed_m_s'], 'linear speed')
+        angular = positive(args.angular_speed if args.angular_speed is not None else op['default_angular_speed_rad_s'], 'angular speed')
+        # Explicit excessive values are rejected, not silently accepted as a different command.
+        for value, limit, label in ((speed, c['limits']['max_wheel_speed_rad_s'], 'wheel'),
+                                    (linear, c['limits']['max_linear_speed_m_s'], 'linear'),
+                                    (angular, c['limits']['max_angular_speed_rad_s'], 'angular')):
+            if limit is not None and value > limit:
+                raise RuntimeError(label + ' speed exceeds effective YAML limit')
+        if args.command in ('move', 'turn', 'wheel-angle'):
+            if args.continuous or args.duration is not None:
+                raise RuntimeError('Relative targets use --timeout, not --duration/--continuous')
+            kind = {'move': 1, 'turn': 2, 'wheel-angle': 3}[args.command]
+            value = args.distance if kind == 1 else args.angle
+            if value is None or not math.isfinite(value) or value == 0 or not args.enable:
+                raise RuntimeError('Relative motion needs nonzero --distance/--angle and --enable')
+            value = value if kind == 1 else math.radians(value)
+            timeout = positive(args.timeout, 'timeout') if args.timeout is not None else 0.0
+            client.move_relative(kind, value, {1: linear, 2: angular, 3: speed}[kind], timeout, args.enable)
+            return
+        if args.timeout is not None or args.distance is not None or args.angle is not None:
+            raise RuntimeError('Direction commands accept --duration/--continuous, not relative arguments')
+        seconds = positive(args.duration if args.duration is not None else op['default_duration_s'], 'duration')
+        if not args.continuous and op['max_duration_s'] is not None and seconds > op['max_duration_s']:
+            raise RuntimeError('Duration exceeds YAML limit')
+        mode = c['operation_mode']
+        signs = {'forward': (1, 1), 'backward': (-1, -1), 'left': (-1, 1), 'right': (1, -1)}[args.command]
+        if args.speed is not None and (args.linear_speed is not None or args.angular_speed is not None):
+            raise RuntimeError('Choose wheel --speed or body speed, not both')
+        if mode == 'base':
+            if args.speed is not None:
+                raise RuntimeError('base controller takes --linear-speed/--angular-speed')
+            message = TwistStamped()
+            message.twist.linear.x = {'forward': linear, 'backward': -linear}.get(args.command, 0.0)
+            message.twist.angular.z = {'left': angular, 'right': -angular}.get(args.command, 0.0)
+            publisher = client.twist_publisher
         else:
-            if args.enable:
-                client.enable()
-            state = client.state()
-            if not state.motion_authorized:
-                raise RuntimeError('Explicit enable required; add --enable or run enable first')
-            signs = {'forward': (1, 1), 'backward': (-1, -1), 'left': (-1, 1), 'right': (1, -1)}[args.command]
-            if state.operation_mode == 'bench':
-                message = WheelVelocityCommand(session_id=state.session_id, left_rad_s=signs[0]*args.speed, right_rad_s=signs[1]*args.speed)
-                publisher = client.publisher
-            elif state.operation_mode == 'base':
-                message = TwistStamped()
-                message.twist.linear.x = {'forward': args.linear_speed, 'backward': -args.linear_speed}.get(args.command, 0.0)
-                message.twist.angular.z = {'left': args.angular_speed, 'right': -args.angular_speed}.get(args.command, 0.0)
-                publisher = client.twist_publisher
-            else:
-                raise RuntimeError('Unsupported operation mode')
-            print(f'backend={state.backend}, mode={state.operation_mode}, command={args.command}', flush=True)
-            deadline = time.monotonic() + args.duration
-            # 新时间戳20Hz；结束或Ctrl+C均请求停止。节点被kill时由命令期限兜底。
-            try:
-                while time.monotonic() < deadline:
-                    message.header.stamp = client.get_clock().now().to_msg()
-                    publisher.publish(message)
-                    rclpy.spin_once(client, timeout_sec=0.01)
-                    time.sleep(0.04)
-                observed = client.state()
-                if observed.lifecycle_state == observed.FAULT or not observed.command_fresh:
-                    raise RuntimeError('Motion not verified: ' + observed.reason)
-            finally:
-                client.stop()
+            wheels = [speed * sign for sign in signs]
+            if args.linear_speed is not None or args.angular_speed is not None:
+                if args.command in ('forward', 'backward'):
+                    wheels = [signs[i] * linear / c['wheels'][side]['effective_radius_m']
+                              for i, side in enumerate(('left', 'right'))]
+                else:
+                    wheels = [signs[i] * angular * c['geometry']['wheel_separation_m'] / 2 /
+                              c['wheels'][side]['effective_radius_m'] for i, side in enumerate(('left', 'right'))]
+            if max(map(abs, wheels)) > c['limits']['max_wheel_speed_rad_s']:
+                raise RuntimeError('Requested body speed exceeds effective wheel limit')
+            message = WheelVelocityCommand(session_id=response.session_id, source_id=str(uuid.uuid4()), left_rad_s=wheels[0], right_rad_s=wheels[1])
+            publisher = client.publisher
+        # The publish timer continues during status service waits; loss of this process stops refresh.
+        if args.enable:
+            client.enable()
+        state = client.state()
+        if state.session_id != response.session_id or not state.motion_authorized:
+            raise RuntimeError('Fresh session and explicit enable required')
+        def publish():
+            message.header.stamp = client.get_clock().now().to_msg()
+            publisher.publish(message)
+        timer = client.create_timer(1 / op['command_publish_rate_hz'], publish)
+        try:
+            publish()
+            deadline = math.inf if args.continuous else time.monotonic() + seconds
+            next_status = time.monotonic()
+            while time.monotonic() < deadline:
+                rclpy.spin_once(client, timeout_sec=1 / op['command_publish_rate_hz'])
+                if time.monotonic() >= next_status:
+                    state = client.state()
+                    if state.session_id != response.session_id or state.lifecycle_state == state.FAULT:
+                        raise RuntimeError(state.reason)
+                    if not state.motion_authorized:
+                        print('Server stopped motion: ' + state.reason, flush=True)
+                        break
+                    next_status = time.monotonic() + 0.25
+        finally:
+            client.destroy_timer(timer)
+            client.stop()
     except (RuntimeError, KeyboardInterrupt) as error:
-        print('Operation stopped:', error, flush=True)
+        print('Operation stopped: ' + str(error), flush=True)
         raise SystemExit(1)
     finally:
         client.destroy_node()

@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+# 离线生成Nav2感知配置片段，不启动节点、不发布运动目标。
+from lidar_slam.nav2_support import main
+
+if __name__ == '__main__':
+    main()

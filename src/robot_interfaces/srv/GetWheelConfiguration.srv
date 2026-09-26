@@ -1,0 +1,6 @@
+# Immutable effective node configuration; no USB/CAN transaction.
+---
+string session_id
+string configuration_digest
+string source_path
+string configuration_yaml

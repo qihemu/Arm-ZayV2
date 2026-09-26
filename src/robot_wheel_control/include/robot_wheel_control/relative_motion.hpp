@@ -19,7 +19,7 @@ struct RelativeSettings
     double max_distance = 1.0, max_yaw = 3.141592653589793;
     double stall_timeout_s = 4.0, progress_step = 0.002;
     int settle_ms = 500, heartbeat_ms = 500;
-    double max_timeout_s = 180;
+    double max_timeout_s = 0, timeout_factor = 2, timeout_margin = 5;
 };
 // 独立纯计算模块：有比例减速、制动距离约束和左右归一化进度同步。
 inline std::array<double, 2> relative_velocity(const std::array<double, 2> &target,

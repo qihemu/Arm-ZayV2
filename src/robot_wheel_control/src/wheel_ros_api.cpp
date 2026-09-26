@@ -12,7 +12,7 @@ WheelRosApi::WheelRosApi(std::shared_ptr<WheelRuntime> r)
     status_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     states_ = create_publisher<msg::WheelBaseState>("state", rclcpp::QoS(1).reliable());
     events_ = create_publisher<msg::WheelControlEvent>("control_events", rclcpp::QoS(32).reliable());
-    if (runtime_->configuration().mode == "bench")
+    if (runtime_->configuration().mode != "base")
     {
         joints_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     }
@@ -25,12 +25,12 @@ WheelRosApi::WheelRosApi(std::shared_ptr<WheelRuntime> r)
         [this](msg::WheelVelocityCommand::SharedPtr m)
         {
             const auto s = runtime_->snapshot();
-            if (runtime_->configuration().mode != "bench" || m->session_id != s.session ||
+            if (runtime_->configuration().mode == "base" || m->session_id != s.session ||
                 !fresh(m->header.stamp))
             {
                 return;
             }
-            if (s.permitted && !s.relative_active && !runtime_->command({m->left_rad_s, m->right_rad_s}))
+            if (s.permitted && !s.relative_active && !runtime_->command({m->left_rad_s, m->right_rad_s}, false, m->source_id))
             {
                 runtime_->request_fault("Invalid wheel command");
             }
@@ -60,6 +60,17 @@ WheelRosApi::WheelRosApi(std::shared_ptr<WheelRuntime> r)
             twist_out_->publish(*m);
         },
         sub_options);
+    // Serve immutable effective YAML; clients never infer limits from a local cache.
+    configuration_ = create_service<srv::GetWheelConfiguration>("get_configuration",
+        [this](const std::shared_ptr<srv::GetWheelConfiguration::Request>,
+               std::shared_ptr<srv::GetWheelConfiguration::Response> p)
+        {
+            const auto &c = runtime_->configuration();
+            p->session_id = runtime_->snapshot().session;
+            p->configuration_digest = c.digest;
+            p->source_path = c.source_path;
+            p->configuration_yaml = c.yaml;
+        }, rmw_qos_profile_services_default, status_);
     enable_ = create_service<srv::SetWheelBaseEnabled>(
         "set_enabled",
         [this](const std::shared_ptr<srv::SetWheelBaseEnabled::Request> q,
@@ -197,6 +208,9 @@ msg::WheelBaseState WheelRosApi::message()
     out.last_request_id = s.last_request;
     out.last_request_state = s.last_result;
     out.reason = s.reason;
+    out.action_wheel_travel_m = s.action_travel;
+    out.action_distance_limit_m = c.action_distance;
+    out.relative_timeout_s = s.relative_goal.timeout_s;
     out.relative_motion_active = s.relative_active;
     out.relative_request_id = s.relative_id;
     out.relative_kind = s.relative_goal.kind;

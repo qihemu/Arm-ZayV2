@@ -1,328 +1,117 @@
-#!/bin/bash
-# 选择性编译脚本 - 允许用户选择需要编译的包
-
-# 获取脚本所在目录的绝对路径
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-WORKSPACE_DIR="${SCRIPT_DIR}"
-
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 打印标题
-echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}  按摩机器人选择性编译脚本${NC}"
-echo -e "${BLUE}================================${NC}"
-echo ""
-
-
-
-# Source ROS2 setup
-if [ -f "/opt/ros/humble/setup.bash" ]; then
-    echo -e "${GREEN}✓ Sourcing ROS2 Humble setup...${NC}"
-    source /opt/ros/humble/setup.bash
-else
-    echo -e "${RED}错误: ROS2 Humble setup.bash 未找到${NC}"
-    exit 1
+#!/usr/bin/env bash
+# 本机H55与C1模块构建入口，保留各自ASCII缓存，不安装依赖或操作硬件。
+set -eo pipefail
+robot_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ ${1:-} == --help || ${1:-} == -h ]]; then
+    echo "用法: $0 [all|wheel|lidar|core]"
+    echo "all = H55轮控及C1感知（含共享依赖），不包含原机械臂/MoveIt工程。"
+    exit 0
 fi
-
-cd "${WORKSPACE_DIR}"
-
-# 获取所有包
-echo -e "${YELLOW}正在扫描工作空间中的包...${NC}"
-echo ""
-
-# 获取所有包列表
-PACKAGES=($(colcon list -n 2>/dev/null))
-
-if [ ${#PACKAGES[@]} -eq 0 ]; then
-    echo -e "${RED}错误: 未找到任何包${NC}"
-    exit 1
-fi
-
-# 显示包列表
-echo -e "${GREEN}找到以下包:${NC}"
-echo ""
-
-# 创建包数组用于选择
-declare -a SELECTED_PACKAGES=()
-declare -a PACKAGE_STATUS=()
-
-# 初始化所有包状态为未选择
-for i in "${!PACKAGES[@]}"; do
-    PACKAGE_STATUS[$i]=0
-done
-
-# 显示菜单函数
-show_menu() {
-    # 保留历史输出日志，避免每次刷新菜单时清屏。
-    echo -e "${BLUE}================================${NC}"
-    echo -e "${BLUE}  选择需要编译的包${NC}"
-    echo -e "${BLUE}================================${NC}"
-    echo ""
-    
-    for i in "${!PACKAGES[@]}"; do
-        local num=$((i + 1))
-        if [ ${PACKAGE_STATUS[$i]} -eq 1 ]; then
-            echo -e "${GREEN}[$num] [✓] ${PACKAGES[$i]}${NC}"
-        else
-            echo -e " $num  [ ] ${PACKAGES[$i]}"
-        fi
-    done
-    
-    echo ""
-    echo -e "${YELLOW}操作说明:${NC}"
-    echo "  - 输入数字选择/取消选择包"
-    echo "  - 输入 'a' 或 'all' 选择所有包"
-    echo "  - 输入 'n' 或 'none' 取消所有选择"
-    echo "  - 输入 'b' 或 'build' 开始编译"
-    echo "  - 输入 'q' 或 'quit' 退出"
-    echo ""
-    echo -n "请选择: "
-}
-
-# 主循环
-while true; do
-    show_menu
-    read -r choice
-    
-    case "$choice" in
-        a|all)
-            # 选择所有包
-            for i in "${!PACKAGES[@]}"; do
-                PACKAGE_STATUS[$i]=1
-            done
-            ;;
-        n|none)
-            # 取消所有选择
-            for i in "${!PACKAGES[@]}"; do
-                PACKAGE_STATUS[$i]=0
-            done
-            ;;
-        b|build)
-            # 开始编译
-            SELECTED_PACKAGES=()
-            for i in "${!PACKAGES[@]}"; do
-                if [ ${PACKAGE_STATUS[$i]} -eq 1 ]; then
-                    SELECTED_PACKAGES+=("${PACKAGES[$i]}")
-                fi
-            done
-            
-            if [ ${#SELECTED_PACKAGES[@]} -eq 0 ]; then
-                echo ""
-                echo -e "${RED}错误: 没有选择任何包!${NC}"
-                echo ""
-                read -p "按回车继续..."
-                echo ""
-                continue
-            fi
-            
-            # 检查是否选择了所有包
-            IS_ALL_PACKAGES=true
-            if [ ${#SELECTED_PACKAGES[@]} -ne ${#PACKAGES[@]} ]; then
-                IS_ALL_PACKAGES=false
-            fi
-            
-            # 对选中的包进行排序，确保基础包优先编译
-            # 优先级: robot_interfaces > zayv2_description > 其他包
-            PRIORITY_PACKAGES=()
-            OTHER_PACKAGES=()
-            
-            for pkg in "${SELECTED_PACKAGES[@]}"; do
-                if [ "$pkg" = "robot_interfaces" ]; then
-                    PRIORITY_PACKAGES=("robot_interfaces" "${PRIORITY_PACKAGES[@]}")
-                elif [ "$pkg" = "zayv2_description" ]; then
-                    # zayv2_description 排在 robot_interfaces 之后
-                    if [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_interfaces " ]]; then
-                        # 如果已经有 robot_interfaces，插入到它后面
-                        PRIORITY_PACKAGES=("${PRIORITY_PACKAGES[@]}" "zayv2_description")
-                    else
-                        # 否则放在最前面
-                        PRIORITY_PACKAGES=("zayv2_description" "${PRIORITY_PACKAGES[@]}")
-                    fi
-                else
-                    OTHER_PACKAGES+=("$pkg")
-                fi
-            done
-            
-            # 合并排序后的包列表
-            SELECTED_PACKAGES=("${PRIORITY_PACKAGES[@]}" "${OTHER_PACKAGES[@]}")
-            
-            clear
-            echo -e "${BLUE}================================${NC}"
-            echo -e "${BLUE}  开始编译选定的包${NC}"
-            echo -e "${BLUE}================================${NC}"
-            echo ""
-            echo -e "${GREEN}将要编译以下包:${NC}"
-            for pkg in "${SELECTED_PACKAGES[@]}"; do
-                echo "  - $pkg"
-            done
-            echo ""
-            
-            # 如果是全部编译，提示将先清理
-            if [ "$IS_ALL_PACKAGES" = true ]; then
-                echo -e "${YELLOW}注意: 全部编译模式将先清理 build、install 和 log 目录${NC}"
-                echo ""
-            fi
-
-            # 询问编译模式
-            echo ""
-            echo -n "请选择编译模式 (1=Release, 2=Debug) [默认: 1]: "
-            read -r build_mode_choice
-            
-            BUILD_TYPE="Release"
-            if [[ "$build_mode_choice" == "2" ]]; then
-                BUILD_TYPE="Debug"
-                echo -e "${YELLOW}✓ 使用 Debug 模式编译 (包含调试信息)${NC}"
-            else
-                BUILD_TYPE="Release"
-                echo -e "${GREEN}✓ 使用 Release 模式编译 (优化性能)${NC}"
-            fi
-            
-            # 询问是否使用 --merge-install 参数
-            echo ""
-            echo -n "是否使用 --merge-install 参数，默认不使用? (y/N): "
-            read -r merge_install_choice
-            
-            MERGE_INSTALL_FLAG=""
-            if [[ "$merge_install_choice" =~ ^[yY]$ ]]; then
-                MERGE_INSTALL_FLAG="--merge-install"
-                echo -e "${GREEN}✓ 将使用 --merge-install 参数${NC}"
-            else
-                echo -e "${YELLOW}✓ 不使用 --merge-install 参数${NC}"
-            fi
-
-            # 询问 CPU 并行度
-            TOTAL_CPUS=$(nproc)
-            DEFAULT_WORKERS=$((TOTAL_CPUS > 1 ? TOTAL_CPUS - 1 : 1))
-            echo ""
-            echo -n "请输入并行编译包数量 (CPU核心数: ${TOTAL_CPUS}, 默认: ${DEFAULT_WORKERS}，直接回车使用默认值): "
-            read -r parallel_choice
-
-            PARALLEL_WORKERS_FLAG=""
-            CMAKE_PARALLEL_LEVEL=""
-            if [[ "$parallel_choice" =~ ^[1-9][0-9]*$ ]]; then
-                PARALLEL_WORKERS_FLAG="--parallel-workers $parallel_choice"
-                CMAKE_PARALLEL_LEVEL="-DCMAKE_BUILD_PARALLEL_LEVEL=$parallel_choice"
-                echo -e "${GREEN}✓ 使用 $parallel_choice 个并行工作进程${NC}"
-            else
-                PARALLEL_WORKERS_FLAG="--parallel-workers $DEFAULT_WORKERS"
-                CMAKE_PARALLEL_LEVEL="-DCMAKE_BUILD_PARALLEL_LEVEL=$DEFAULT_WORKERS"
-                echo -e "${GREEN}✓ 使用默认 $DEFAULT_WORKERS 个并行工作进程${NC}"
-            fi
-            echo ""
-            
-            # 如果是全部编译，先清理
-            if [ "$IS_ALL_PACKAGES" = true ]; then
-                echo -e "${YELLOW}正在清理编译产物...${NC}"
-                echo ""
-                
-                if [ -d "${WORKSPACE_DIR}/build" ]; then
-                    echo "  - 删除 build 目录"
-                    rm -rf "${WORKSPACE_DIR}/build"
-                fi
-                
-                if [ -d "${WORKSPACE_DIR}/install" ]; then
-                    echo "  - 删除 install 目录"
-                    rm -rf "${WORKSPACE_DIR}/install"
-                fi
-                
-                if [ -d "${WORKSPACE_DIR}/log" ]; then
-                    echo "  - 删除 log 目录"
-                    rm -rf "${WORKSPACE_DIR}/log"
-                fi
-                
-                echo ""
-                echo -e "${GREEN}✓ 清理完成${NC}"
-                echo ""
-            fi
-            
-            BUILD_STATUS=0
-            
-            # 检查是否需要优先编译基础包
-            if [[ " ${PRIORITY_PACKAGES[@]} " =~ " robot_interfaces " ]] || [[ " ${PRIORITY_PACKAGES[@]} " =~ " zayv2_description " ]]; then
-                echo -e "${YELLOW}步骤 1: 优先编译基础包...${NC}"
-                echo ""
-                
-                # 构建命令参数（--packages-select 后跟所有包名）
-                echo -e "${YELLOW}执行命令: colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select ${PRIORITY_PACKAGES[*]} --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}${NC}"
-                echo ""
-                
-                colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select "${PRIORITY_PACKAGES[@]}" --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}
-                BUILD_STATUS=$?
-                
-                if [ $BUILD_STATUS -ne 0 ]; then
-                    echo ""
-                    echo -e "${RED}基础包编译失败! (错误码: $BUILD_STATUS)${NC}"
-                else
-                    echo ""
-                    echo -e "${GREEN}✓ 基础包编译成功${NC}"
-                    
-                    # 如果还有其他包需要编译
-                    if [ ${#OTHER_PACKAGES[@]} -gt 0 ]; then
-                        echo ""
-                        echo -e "${YELLOW}步骤 2: 编译其他包...${NC}"
-                        echo ""
-                        
-                        echo -e "${YELLOW}执行命令: colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select ${OTHER_PACKAGES[*]} --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}${NC}"
-                        echo ""
-                        
-                        colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select "${OTHER_PACKAGES[@]}" --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}
-                        BUILD_STATUS=$?
-                    fi
-                fi
-            else
-                # 没有优先包，直接编译所有选中的包
-                echo -e "${YELLOW}执行命令: colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select ${SELECTED_PACKAGES[*]} --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}${NC}"
-                echo ""
-                
-                colcon build --symlink-install ${MERGE_INSTALL_FLAG} ${PARALLEL_WORKERS_FLAG} --packages-select "${SELECTED_PACKAGES[@]}" --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_PARALLEL_LEVEL}
-                BUILD_STATUS=$?
-            fi
-            echo ""
-            if [ $BUILD_STATUS -eq 0 ]; then
-                echo -e "${GREEN}================================${NC}"
-                echo -e "${GREEN}  编译成功!${NC}"
-                echo -e "${GREEN}================================${NC}"
-            else
-                echo -e "${RED}================================${NC}"
-                echo -e "${RED}  编译失败! (错误码: $BUILD_STATUS)${NC}"
-                echo -e "${RED}================================${NC}"
-            fi
-            
-            echo ""
-            read -p "按回车继续..."
-            echo ""
-            ;;
-        q|quit)
-            echo ""
-            echo -e "${YELLOW}退出编译脚本${NC}"
-            exit 0
-            ;;
-        ''|*)
-            # 数字选择
-            if [[ "$choice" =~ ^[0-9]+$ ]]; then
-                idx=$((choice - 1))
-                if [ $idx -ge 0 ] && [ $idx -lt ${#PACKAGES[@]} ]; then
-                    # 切换选择状态
-                    if [ ${PACKAGE_STATUS[$idx]} -eq 1 ]; then
-                        PACKAGE_STATUS[$idx]=0
-                    else
-                        PACKAGE_STATUS[$idx]=1
-                    fi
-                else
-                    echo ""
-                    echo -e "${RED}无效的选择!${NC}"
-                    sleep 1
-                fi
-            elif [ -n "$choice" ]; then
-                echo ""
-                echo -e "${RED}无效的输入!${NC}"
-                sleep 1
-            fi
-            ;;
+if [[ $# == 0 ]]; then
+    echo '编译模块: 1) 轮控+雷达  2) 轮控  3) 雷达  4) 仅core  q)退出'
+    read -r -p '选择: ' selection || exit 1
+    case "$selection" in
+        1) set -- all ;; 2) set -- wheel ;; 3) set -- lidar ;; 4) set -- core ;; q) exit 0 ;;
+        *) echo '无效选择' >&2; exit 2 ;;
     esac
-done
+fi
+[[ $# == 1 ]] || { echo '只接受一个编译目标' >&2; exit 2; }
+case "$1" in all|wheel|lidar|core) ;; *) echo "未知编译目标: $1" >&2; exit 2 ;; esac
+# 同一源码工作空间禁止并发构建，防止缓存复制和安装互相覆盖。
+mkdir -p "$robot_root/logs/build"
+exec 9>"$robot_root/logs/build/.lock"
+flock -n 9 || { echo '已有构建正在运行' >&2; exit 1; }
+
+# wheel模块：保留原构建依赖和旧缓存迁移。
+build_wheel() (
+    wheel_source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    wheel_build_root="${XDG_CACHE_HOME:-$HOME/.cache}/h55-wheel-control"
+    wheel_deps_root="$(dirname "$wheel_source_root")/.local/wheel-ros-deps/root"
+    source /opt/ros/humble/setup.bash
+    if [[ -d "$wheel_deps_root/opt/ros/humble" ]]; then
+        export AMENT_PREFIX_PATH="$wheel_deps_root/opt/ros/humble:${AMENT_PREFIX_PATH:-}"
+        export CMAKE_PREFIX_PATH="$wheel_deps_root/opt/ros/humble:$wheel_deps_root/usr:${CMAKE_PREFIX_PATH:-}"
+        export LD_LIBRARY_PATH="$wheel_deps_root/opt/ros/humble/lib:${LD_LIBRARY_PATH:-}"
+        export PYTHONPATH="$wheel_deps_root/opt/ros/humble/local/lib/python3.10/dist-packages:$wheel_deps_root/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
+    fi
+    python3 - "$wheel_source_root" "$wheel_build_root" <<'PY'
+import shutil, sys
+from pathlib import Path
+source, target = map(Path, sys.argv[1:])
+# 本次轮控测试已在验证后移出Git仓库，清理其旧源码与CMake缓存，防止增量构建残留。
+retired = target / 'src/robot_wheel_control/test'
+if retired.exists():
+    shutil.rmtree(retired)
+    old_build = target / 'build/robot_wheel_control'
+    if old_build.exists():
+        shutil.rmtree(old_build)
+# 清除本轮明确迁出运行包的旧缓存文件，避免增量复制留下模拟入口/公开头文件。
+for relative in (
+    'src/robot_wheel_control/src/mock_transport.cpp',
+    'src/robot_wheel_control/include/robot_wheel_control/mock_transport.hpp',
+    'src/robot_wheel_control/test/ros_smoke.py',
+    'install/robot_wheel_control/include/robot_wheel_control/mock_transport.hpp',
+):
+    obsolete = target / relative
+    if obsolete.is_file():
+        obsolete.unlink()
+for package in ('damiao_core', 'robot_interfaces', 'robot_wheel_control', 'damiao_hardware', 'damiao_tools'):
+    shutil.copytree(source / 'src' / package, target / 'src' / package, dirs_exist_ok=True)
+shutil.copytree(source / 'config', target / 'config', dirs_exist_ok=True)
+PY
+    cd "$wheel_build_root"
+    colcon build --base-paths src --packages-select damiao_core robot_interfaces robot_wheel_control damiao_hardware damiao_tools --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF
+    printf 'Build complete: source %s/scripts/wheel_env.bash\n' "$wheel_source_root"
+)
+
+# lidar模块：保留原构建依赖和旧缓存迁移。
+build_lidar() (
+    lidar_source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    lidar_build_root="${XDG_CACHE_HOME:-$HOME/.cache}/arm-zay-lidar"
+    source /opt/ros/humble/setup.bash
+    python3 - "$lidar_source_root" "$lidar_build_root" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+source, target = map(Path, sys.argv[1:])
+# 清理本次迁出的旧包内配置缓存，避免同名旧配置残留误导使用者。
+retired = target / 'src/lidar_slam/config'
+if retired.exists():
+    shutil.rmtree(retired)
+for old in ('perception.yaml', 'mount.yaml', 'slam.yaml', 'amcl.yaml', 'record_qos.yaml', 'map_context.example.yaml'):
+    installed = target / 'install/lidar_slam/share/lidar_slam/config' / old
+    if installed.is_file():
+        installed.unlink()
+# 本轮统一配置后移除工具自己维护的八份旧缓存，唯一保留lidar_slam.yaml。
+for old in ('lidar_driver.yaml', 'lidar_mount.yaml', 'lidar_perception.yaml', 'lidar_data.yaml',
+            'lidar_amcl.yaml', 'lidar_record_qos.yaml', 'lidar_map_context.example.yaml', 'lidar_nav2.example.yaml'):
+    for directory in (target / 'config', target / 'install/lidar_slam/share/lidar_slam/config'):
+        obsolete = directory / old
+        if obsolete.is_file():
+            obsolete.unlink()
+for package in ('robot_interfaces', 'lidar_slam'):
+    shutil.copytree(source / 'src' / package, target / 'src' / package, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('__pycache__', '.pytest_cache'))
+shutil.copytree(source / 'config', target / 'config', dirs_exist_ok=True)
+PY
+    cd "$lidar_build_root"
+    colcon build --base-paths src --packages-select robot_interfaces lidar_slam --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF
+    printf 'Build complete: source %s/scripts/lidar_env.bash\n' "$lidar_source_root"
+)
+
+# core可单独开发；放在独立缓存，避免与colcon构建目录混用。
+build_core() (
+    core_cache="${XDG_CACHE_HOME:-$HOME/.cache}/arm-zay-core"
+    cmake -S "$robot_root/src/damiao_core" -B "$core_cache" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    cmake --build "$core_cache" --parallel 2
+)
+build_selected() {
+    case "$1" in
+        wheel) build_wheel ;; lidar) build_lidar ;; core) build_core ;;
+        all) build_wheel; build_lidar ;;
+    esac
+}
+# pipefail保留真实构建失败状态，按次保留输出，不清空历史日志。
+build_log="$robot_root/logs/build/$(date +%Y%m%d-%H%M%S)-$$-$1.log"
+echo "构建日志: $build_log"
+build_selected "$1" 2>&1 | tee "$build_log"

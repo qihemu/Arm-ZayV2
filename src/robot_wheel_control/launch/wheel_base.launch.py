@@ -16,6 +16,8 @@ def setup(context):
     backend = LaunchConfiguration('backend').perform(context)
     with open(path, encoding='utf8') as source:
         c = yaml.safe_load(source)['robot_wheel_control']
+    if c['operation_mode'] != 'base':
+        raise RuntimeError('Set operation_mode: base in the source YAML after commissioning')
     wheels = [c['wheels'][name] for name in ('left', 'right')]
     radii = [wheel['effective_radius_m'] for wheel in wheels]
     separation = c['geometry']['wheel_separation_m']
@@ -57,10 +59,10 @@ def setup(context):
             'angular.z.min_velocity': -float(limits['max_angular_speed_rad_s']),
             'linear.x.has_acceleration_limits': True,
             'linear.x.max_acceleration': float(limits['max_linear_acceleration_m_s2']),
-            'linear.x.min_acceleration': -float(limits['max_linear_acceleration_m_s2']),
+            'linear.x.min_acceleration': -float(limits['max_linear_deceleration_m_s2']),
             'angular.z.has_acceleration_limits': True,
             'angular.z.max_acceleration': float(limits['max_angular_acceleration_rad_s2']),
-            'angular.z.min_acceleration': -float(limits['max_angular_acceleration_rad_s2']),
+            'angular.z.min_acceleration': -float(limits['max_angular_deceleration_rad_s2']),
         }},
         '/base/joint_state_broadcaster': {'ros__parameters': {'use_local_topics': True}},
     }
@@ -88,6 +90,6 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=PathJoinSubstitution([
             FindPackageShare('robot_wheel_control'), 'config', 'robot_wheel_control.yaml'])),
-        DeclareLaunchArgument('backend', default_value='direct_usb_sdk', choices=['direct_usb_sdk', 'socketcan']),
+        DeclareLaunchArgument('backend', default_value='', choices=['', 'direct_usb_sdk', 'socketcan']),
         OpaqueFunction(function=setup),
     ])

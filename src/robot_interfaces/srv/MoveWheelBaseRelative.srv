@@ -9,6 +9,7 @@ uint8 kind
 float64 value
 # 对应m/s或rad/s；仍受配置中的轮速上限约束。
 float64 max_speed
+# 0 means server-calculated finite deadline from effective speed, ramps and YAML margin.
 float64 timeout_s
 bool enable
 ---

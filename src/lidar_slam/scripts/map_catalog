@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+# 独立ROS/CLI入口；实现位于Python模块。
+from lidar_slam.catalog import main
+
+if __name__ == "__main__":
+    main()

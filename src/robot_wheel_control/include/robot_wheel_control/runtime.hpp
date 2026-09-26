@@ -35,6 +35,8 @@ struct RuntimeState
     int lifecycle = 0;
     std::uint64_t sequence = 0, fault_sequence = 0;
     double path = 0;
+    std::array<double, 2> action_travel{};
+    bool action_tracking = false;
     std::string reason = "Starting", session, last_request;
     int last_result = 0;
     bool relative_active = false;
@@ -56,7 +58,7 @@ class WheelRuntime
     {
         return config_;
     }
-    bool command(const std::array<double, 2> &speed, bool controller_write = false);
+    bool command(const std::array<double, 2> &speed, bool controller_write = false, const std::string &source_id = "");
     void authorize_source(); // 仅新鲜、经仲裁的TwistStamped调用；不使能。
     bool submit(Operation operation, const std::string &session, const std::string &id,
                 std::uint64_t expected_fault, bool disable_after, std::string &reason,
@@ -84,6 +86,9 @@ class WheelRuntime
     void prune_history_locked();
     void update_measurements();
     void fault(const std::string &reason);
+    std::array<double, 2> ramp(const std::array<double, 2> &target) const;
+    double effective_deceleration() const;
+    std::string motion_guard(const RuntimeState &s, bool braking = false) const;
     damiao::Status start_relative(const Request &request);
     bool step_relative(damiao::Deadline now);
     void end_relative(damiao::Status outcome, bool already_stopped = false);
@@ -93,6 +98,7 @@ class WheelRuntime
     mutable std::mutex mutex_;
     std::condition_variable changed_;
     RuntimeState state_;
+    std::string command_owner_;
     std::string fault_reason_; // 保留首次故障，不被后续停车成功文案覆盖。
     std::array<PositionTracker, 2> trackers_;
     std::array<double, 2> target_{}, sent_{}, bench_origin_{};

@@ -17,6 +17,7 @@ struct MotorConfig
 struct BusConfig
 {
     std::array<MotorConfig, 2> motors;
+    bool write_protection_on_startup = false;
     std::chrono::milliseconds reply_timeout{100};
     std::chrono::milliseconds feedback_timeout{50};
     double readback_tolerance = 1e-4;

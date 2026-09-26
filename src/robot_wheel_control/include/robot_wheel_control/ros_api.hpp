@@ -10,6 +10,7 @@
 #include <robot_interfaces/srv/stop_wheel_base.hpp>
 #include <robot_interfaces/srv/clear_wheel_base_fault.hpp>
 #include <robot_interfaces/srv/get_wheel_base_state.hpp>
+#include <robot_interfaces/srv/get_wheel_configuration.hpp>
 #include <robot_interfaces/srv/get_wheel_control_result.hpp>
 #include <robot_interfaces/srv/move_wheel_base_relative.hpp>
 #include <robot_interfaces/msg/wheel_motion_heartbeat.hpp>
@@ -37,6 +38,7 @@ class WheelRosApi : public rclcpp::Node
     rclcpp::Service<robot_interfaces::srv::StopWheelBase>::SharedPtr stop_;
     rclcpp::Service<robot_interfaces::srv::ClearWheelBaseFault>::SharedPtr clear_;
     rclcpp::Service<robot_interfaces::srv::GetWheelBaseState>::SharedPtr get_;
+    rclcpp::Service<robot_interfaces::srv::GetWheelConfiguration>::SharedPtr configuration_;
     rclcpp::Service<robot_interfaces::srv::GetWheelControlResult>::SharedPtr result_;
     rclcpp::Service<robot_interfaces::srv::MoveWheelBaseRelative>::SharedPtr relative_;
     rclcpp::Subscription<robot_interfaces::msg::WheelMotionHeartbeat>::SharedPtr heartbeat_;

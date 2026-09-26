@@ -32,3 +32,5 @@ damiao_motor_tool --file src/damiao_tools/config/motor.example.yaml
 当前开发状态与下一步验收顺序见
 [实施步骤](docs/zayv2-implementation-steps.md) 和
 [开发文档](docs/damiao-development-guide.md)。
+
+统一编译、启动和按包查看日志，见[工作空间脚本说明](scripts/README.md)；三个入口位于工作空间根目录。

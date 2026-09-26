@@ -61,8 +61,39 @@ Status WheelRuntime::start_relative(const Request &r)
     {
         cap *= ratio;
     }
-    const double minimum_time = std::max(std::abs(target[0]) / caps[0], std::abs(target[1]) / caps[1]);
-    if (minimum_time + 2 * config_.relative.settle_ms / 1000.0 >= r.goal.timeout_s)
+    double minimum_time = 0;
+    const auto before = snapshot();
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const double acceleration = config_.mode == "bench" ? config_.wheel_acceleration :
+            std::min({config_.wheel_acceleration, config_.linear_acceleration / config_.radius[i],
+                      config_.angular_acceleration * config_.separation / (2 * config_.radius[i])});
+        minimum_time = std::max(minimum_time, std::abs(target[i]) / caps[i] + caps[i] / acceleration +
+                                caps[i] / effective_deceleration());
+        if (config_.mode == "commissioning")
+        {
+            if (std::abs(target[i]) * config_.radius[i] + config_.stop_margin >= config_.action_distance)
+            {
+                return {ErrorCode::InvalidCommand, "Target exceeds commissioning action budget including reserve"};
+            }
+            const double raw_target = before.motors[i].output_position_rad + target[i] * config_.direction[i] * config_.reduction[i];
+            if (!config_.continuous_verified && std::abs(raw_target) + config_.raw_position_margin >= config_.bus.motors[i].mapping.position_rad)
+            {
+                return {ErrorCode::InvalidCommand, "Target crosses unverified raw position boundary"};
+            }
+        }
+    }
+    const double estimate = minimum_time + 2 * config_.relative.settle_ms / 1000.0;
+    const double timeout = r.goal.timeout_s > 0 ? r.goal.timeout_s :
+        estimate * config_.relative.timeout_factor + config_.relative.timeout_margin;
+    // Bound chrono representability without imposing an arbitrary business distance/time cap.
+    const double representable = std::chrono::duration<double>(Deadline::max() - SteadyClock::now()).count() / 2;
+    if (!std::isfinite(timeout) || timeout >= representable ||
+        (config_.relative.max_timeout_s > 0 && timeout > config_.relative.max_timeout_s))
+    {
+        return {ErrorCode::InvalidCommand, "Calculated deadline is not representable or exceeds configured maximum"};
+    }
+    if (estimate >= timeout)
     {
         return {ErrorCode::InvalidCommand, "Timeout too short for target and configured speed limit"};
     }
@@ -81,6 +112,7 @@ Status WheelRuntime::start_relative(const Request &r)
         return {ErrorCode::NotExecuted, "Relative start cancelled or position unavailable"};
     }
     active_relative_ = r;
+    active_relative_->goal.timeout_s = timeout;
     relative_origin_ = snapshot().position;
     relative_caps_ = caps;
     progress_anchor_ = {};
@@ -89,6 +121,7 @@ Status WheelRuntime::start_relative(const Request &r)
     progress_since_.fill(relative_started_);
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        state_.relative_goal.timeout_s = timeout;
         state_.relative_target = target;
         state_.relative_travel = {};
         state_.relative_measured = 0;
@@ -132,7 +165,7 @@ bool WheelRuntime::step_relative(Deadline now)
         }
     }
     const auto velocity = relative_velocity(s.relative_target, travel, relative_caps_,
-                                            config_.wheel_acceleration, config_.relative);
+                                            effective_deceleration(), config_.relative);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_.relative_travel = travel;

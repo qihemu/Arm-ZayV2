@@ -1,4 +1,4 @@
-# source本文件准备有人看护的悬空诊断环境；本文件不打开USB、不写电机、不启动节点。
+# source本文件准备有人看护的H55诊断环境（模式来自根YAML）；本文件不打开USB、不写电机、不启动节点。
 wheel_bench_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$wheel_bench_root/scripts/wheel_env.bash"
 export ROS_DOMAIN_ID=55
@@ -21,8 +21,6 @@ if hashlib.sha256(sdk.read_bytes()).hexdigest() != expected:
     raise RuntimeError('Diagnostic SDK hash mismatch')
 config = yaml.safe_load((root / 'config/robot_wheel_control.yaml').read_text())
 wheel = config['robot_wheel_control']
-wheel['backend'] = 'direct_usb_sdk'
-wheel['operation_mode'] = 'bench'
 wheel['transport']['usb']['sdk_library_path'] = str(sdk)
 if not wheel['transport']['usb']['serial_number']:
     raise RuntimeError('USB serial_number is empty')
@@ -32,7 +30,8 @@ import os
 temporary = output.with_name(output.name + '.' + str(os.getpid()) + '.tmp')
 temporary.write_text(yaml.safe_dump(config, sort_keys=False))
 temporary.replace(output)
-print('H55 suspended bench only; diagnostic SDK; ROS_DOMAIN_ID=55')
+print('H55 mode=' + wheel['operation_mode'] + '; diagnostic SDK; ROS_DOMAIN_ID=55')
+print('Source: ' + str(root / 'config/robot_wheel_control.yaml'))
 print('Config: ' + str(output))
 PY
 then

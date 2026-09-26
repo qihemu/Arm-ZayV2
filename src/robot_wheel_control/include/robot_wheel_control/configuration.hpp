@@ -10,7 +10,7 @@ namespace robot_wheel_control
 // 配置一次加载后不可热改；几何参数必须来自实机标定。
 struct Configuration
 {
-    std::string backend, mode, name_space, digest;
+    std::string backend, mode, name_space, digest, yaml, source_path;
     damiao::h55::BusConfig bus;
     damiao::TransportConfig transport;
     damiao::DmUsbSdkConfig sdk;
@@ -19,6 +19,12 @@ struct Configuration
     std::array<double, 2> reduction, radius;
     double separation = 0, wrap_period = 0;
     double wheel_speed = 0.2, wheel_acceleration = 0.4, bench_travel = 1;
+    double wheel_deceleration = 2;
+    double linear_speed = 0, angular_speed = 0, linear_acceleration = 0, linear_deceleration = 0;
+    double angular_acceleration = 0, angular_deceleration = 0;
+    double action_distance = 0, stop_margin = 0, raw_position_margin = 0;
+    double command_hz = 20, default_speed = 0.1, default_linear = 0.005, default_angular = 0.02;
+    double default_duration = 1, max_duration = 0, management_wait = 10;
     double torque_limit = 0.8, driver_temperature = 45, motor_temperature = 45;
     double control_hz = 100, status_hz = 10;
     double idle_poll_hz = 25;

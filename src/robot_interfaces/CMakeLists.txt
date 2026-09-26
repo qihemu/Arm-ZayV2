@@ -27,6 +27,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/WheelControlEvent.msg"
     "msg/WheelVelocityCommand.msg"
     "msg/WheelMotionHeartbeat.msg"
+    # 雷达仅观测接口与离线文件服务统一归属robot_interfaces。
+    "msg/LidarState.msg"
 
   # 添加srv文件
   "srv/ArmMoveToPoint.srv"
@@ -37,8 +39,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "srv/StopWheelBase.srv"
     "srv/ClearWheelBaseFault.srv"
     "srv/GetWheelBaseState.srv"
+    "srv/GetWheelConfiguration.srv"
     "srv/GetWheelControlResult.srv"
     "srv/MoveWheelBaseRelative.srv"
+    "srv/GetLidarState.srv"
+    "srv/SaveLidarCloud.srv"
+    "srv/LoadLidarReference.srv"
 
   DEPENDENCIES std_msgs action_msgs geometry_msgs builtin_interfaces
 )

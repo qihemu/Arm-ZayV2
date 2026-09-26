@@ -1,0 +1,6 @@
+# 从data_root/clouds/<name>读回快照，发布到隔离的reference_points，仅用于检查。
+string name
+---
+bool success
+string message
+uint32 point_count

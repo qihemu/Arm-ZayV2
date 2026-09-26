@@ -50,3 +50,8 @@ float64 relative_measured
 float64 relative_error
 float64[2] relative_wheel_target_rad
 float64[2] relative_wheel_travel_rad
+
+# 每动作绝对轮路程，含停车；不是净位移。0上限表示该模式无调试预算。
+float64[2] action_wheel_travel_m
+float64 action_distance_limit_m
+float64 relative_timeout_s

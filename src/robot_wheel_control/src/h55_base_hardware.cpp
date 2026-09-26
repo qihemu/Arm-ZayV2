@@ -48,7 +48,11 @@ CallbackReturn H55BaseHardware::on_configure(const rclcpp_lifecycle::State &)
     try
     {
         auto c = load_configuration(info_.hardware_parameters.at("config_file"),
-                                    info_.hardware_parameters.at("backend"), "base");
+                                    info_.hardware_parameters.at("backend"));
+        if (c.mode != "base")
+        {
+            throw std::runtime_error("Hardware plugin requires operation_mode: base in YAML");
+        }
         for (std::size_t i = 0; i < 2; ++i)
         {
             if (info_.joints[i].name != c.joint_names[i])

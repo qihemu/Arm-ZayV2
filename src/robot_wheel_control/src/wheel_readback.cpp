@@ -15,7 +15,7 @@ int main(int argc, char **argv)
         {
             throw std::runtime_error("Usage: wheel_readback /absolute/config.yaml");
         }
-        auto c = robot_wheel_control::load_configuration(argv[1], "direct_usb_sdk", "bench");
+        auto c = robot_wheel_control::load_configuration(argv[1]);
         c.bus.reply_timeout = std::chrono::milliseconds(1000);
         damiao::h55::H55Bus bus(c.bus, std::make_unique<damiao::DmUsbCanTransport>(c.sdk));
         const auto opened = bus.open(c.transport);

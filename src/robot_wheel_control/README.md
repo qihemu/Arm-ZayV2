@@ -1,5 +1,7 @@
 # robot_wheel_control
 
+> 2026-09-26统一配置更新：当前入口、参数和命令以[统一配置与落地调试](docs/unified_configuration.md)为准；下文旧bench数值保留作历史说明。
+
 新增定距、定角与悬空轮角闭环，使用方法见[相对运动控制](docs/relative_motion.md)。CLI入口为`move`、`turn`、`wheel-angle`；服务为`/base/move_relative`，任务状态与误差通过`/base/state`发布。算法位于`relative_motion.hpp`与`wheel_relative_motion.cpp`，独占TX轮速来源。
 
 日常操作请优先查阅[H55真机常用控制指令](../../../docs/H55真机常用控制指令.md)，包含完整启动、四方向、停车、状态、参数及故障恢复说明。
@@ -32,7 +34,7 @@ launch默认direct_usb_sdk，仅允许direct_usb_sdk/socketcan，不会静默回
 
 保持两轮悬空固定，并关闭之前的轮控节点和商家调试工具。当前步骤使用哈希校验过的低延迟诊断SDK，适用于本次有人看护的短测，尚非正式部署SDK。
 
-代码已构建；以后更改源码再运行`bash scripts/build_wheel.sh`。本机通过~/.cache/h55-wheel-control构建，以避开Humble rosidl中文路径问题；控制依赖位于外层.local/wheel-ros-deps。
+代码已构建；以后更改源码再运行`bash build_robot.sh wheel`。本机通过~/.cache/h55-wheel-control构建，以避开Humble rosidl中文路径问题；控制依赖位于外层.local/wheel-ros-deps。
 
 终端1，准备保护参数并启动真实设备：
 
@@ -113,3 +115,5 @@ USB重新插拔后临时ACL可能丢失。用`lsusb -d 34b7:6877`查看当前Bus
 - 原机械臂core/tools/hardware软件回归；vcan测试在当前环境跳过，不能计为已执行。
 - 实机已完成参数核验、30秒失能连续反馈观察、ROS服务四方向低速短测及停机后观察。USB长时间负载、当前程序失联保护、多圈位置及落地效果待验收。
 - 相对运动已通过真机悬空5°轮角、±1cm等效距离、±3°等效车体转角及最终失能确认；编码器等效结果不等于落地精度验收。
+
+统一编译、启动和按包查看日志，见[工作空间脚本说明](../../scripts/README.md)；三个入口位于工作空间根目录。

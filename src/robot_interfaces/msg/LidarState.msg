@@ -1,0 +1,16 @@
+# 只描述扫描平面内的观测；CLEAR不是整车运动许可。消费者还必须检查状态新鲜度。
+uint8 UNKNOWN=0
+uint8 CLEAR=1
+uint8 CAUTION=2
+uint8 STOP=3
+std_msgs/Header header
+builtin_interfaces/Time scan_stamp
+uint8 level
+bool scan_valid
+bool transform_valid
+bool geometry_calibrated
+float32 scan_age_s
+uint32 valid_points
+# 到底盘矩形外廓的距离；点位于外廓内时为0，未知为NaN。
+float32 nearest_clearance_m
+string reason

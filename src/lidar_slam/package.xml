@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>lidar_slam</name>
+    <version>0.1.0</version>
+    <description>C1 acquisition, obstacle observations and versioned SLAM artifacts.</description>
+    <maintainer email="wlzc@example.com">wlzc</maintainer>
+    <license>Apache-2.0</license>
+    <license>BSD-2-Clause</license>
+    <buildtool_depend>ament_cmake</buildtool_depend>
+    <buildtool_depend>ament_cmake_python</buildtool_depend>
+    <depend>rclcpp</depend>
+    <depend>sensor_msgs</depend>
+    <depend>std_srvs</depend>
+    <exec_depend>rclpy</exec_depend>
+    <exec_depend>rcl_interfaces</exec_depend>
+    <exec_depend>robot_interfaces</exec_depend>
+    <exec_depend>std_msgs</exec_depend>
+    <exec_depend>geometry_msgs</exec_depend>
+    <exec_depend>nav_msgs</exec_depend>
+    <exec_depend>tf2_ros_py</exec_depend>
+    <exec_depend>tf2_ros</exec_depend>
+    <exec_depend>sensor_msgs_py</exec_depend>
+    <exec_depend>python3-yaml</exec_depend>
+    <exec_depend>python3-numpy</exec_depend>
+    <exec_depend>python3-pil</exec_depend>
+    <exec_depend>ament_index_python</exec_depend>
+    <exec_depend>launch_ros</exec_depend>
+    <exec_depend>rviz2</exec_depend>
+    <exec_depend>rosbag2</exec_depend>
+    <!-- SLAM运行入口依赖；纯采集进程不导入或启动这些节点。 -->
+    <exec_depend>slam_toolbox</exec_depend>
+    <exec_depend>nav2_amcl</exec_depend>
+    <exec_depend>nav2_map_server</exec_depend>
+    <exec_depend>nav2_lifecycle_manager</exec_depend>
+    <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,0 +1,7 @@
+# 仅保存新鲜的单帧雷达坐标点云；name为安全文件名，不接受路径。
+string name
+---
+bool success
+string message
+string directory
+uint32 point_count

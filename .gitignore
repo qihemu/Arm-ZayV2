@@ -151,3 +151,7 @@ install/
 
 
 docs/
+
+# Keep wheel operator documentation in Git; exclude generated/general docs as before.
+!src/robot_wheel_control/docs/
+!src/robot_wheel_control/docs/*.md

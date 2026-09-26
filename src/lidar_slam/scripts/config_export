@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+# 从唯一源配置导出第三方工具所需的临时文件，不生成第二套维护入口。
+from lidar_slam.configuration import main
+
+if __name__ == '__main__':
+    main()

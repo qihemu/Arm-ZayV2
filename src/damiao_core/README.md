@@ -37,7 +37,7 @@
 在工作区根目录执行，无需加载 ROS：
 
 ```bash
-./scripts/build_damiao_core.sh
+./build_robot.sh core
 ctest --test-dir build/damiao_core --output-on-failure
 ```
 

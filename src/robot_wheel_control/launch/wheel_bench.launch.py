@@ -10,7 +10,7 @@ def generate_launch_description():
     config = PathJoinSubstitution([FindPackageShare('robot_wheel_control'), 'config', 'robot_wheel_control.yaml'])
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=config),
-        DeclareLaunchArgument('backend', default_value='direct_usb_sdk', choices=['direct_usb_sdk', 'socketcan']),
+        DeclareLaunchArgument('backend', default_value='', choices=['', 'direct_usb_sdk', 'socketcan']),
         Node(package='robot_wheel_control', executable='wheel_bench_node', output='screen',
              parameters=[{'config_file': LaunchConfiguration('config_file'),
                           'backend': LaunchConfiguration('backend')}]),
