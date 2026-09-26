@@ -1,8 +1,0 @@
-# Robot device rules. Install as /etc/udev/rules.d/robot_udev.rules.
-# Preserve the existing rplidar.rules mapping and permissions.
-KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE:="0666", SYMLINK+="rplidar"
-
-# DM-USB2FDCAN: match the USB device itself and its verified unique serial.
-# The SDK opens the USB bus node; this is not a tty or SocketCAN interface.
-# G001 is a member of plugdev. Grant access without a temporary setfacl.
-SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="34b7", ATTR{idProduct}=="6877", ATTR{serial}=="1E9C9B273A7F5444FB21A8088EC3CF27", GROUP:="plugdev", MODE:="0660", SYMLINK+="dm_usb2fdcan"
